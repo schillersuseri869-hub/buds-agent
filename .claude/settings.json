@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Read(//c/c/Users/user1/Documents/BUDS Agent/**)",
-      "Bash(git add *)",
-      "Bash(git commit *)"
-    ]
-  }
-}
