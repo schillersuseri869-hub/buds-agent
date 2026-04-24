@@ -1,0 +1,4 @@
+Generic single-database configuration with an async engine.
+Run migrations on the VPS:
+    docker compose run --rm app alembic revision --autogenerate -m "initial_schema"
+    docker compose run --rm app alembic upgrade head
