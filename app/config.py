@@ -1,5 +1,6 @@
 from typing import Optional
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -19,6 +20,11 @@ class Settings(BaseSettings):
     market_client_id: str
     google_service_account_file: str = "/app/secrets/service_account.json"
     google_spreadsheet_id: str = ""
+
+    @field_validator("florist_telegram_id", "florist_bot_token", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v):
+        return None if v == "" else v
 
     @property
     def database_url(self) -> str:
