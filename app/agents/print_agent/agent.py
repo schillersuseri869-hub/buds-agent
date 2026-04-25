@@ -142,6 +142,39 @@ class PrintAgent:
                 f"будет напечатан при подключении."
             )
 
+    async def flush_pending_jobs(self) -> None:
+        async with self._db_factory() as db:
+            jobs = await get_pending_jobs(db)
+
+        for job in jobs:
+            pdf_bytes = await self._redis.get(job.label_url)
+            if pdf_bytes is None:
+                logger.warning("PDF expired in Redis for job %s, skipping", job.id)
+                continue
+            pdf_b64 = base64.b64encode(pdf_bytes).decode()
+            sent = await send_print_job(str(job.id), pdf_b64)
+            if sent:
+                async with self._db_factory() as db:
+                    await update_job_status(db, job.id, "sent")
+
+    async def handle_ack(self, ack: dict) -> None:
+        job_id_str = ack.get("job_id")
+        status = ack.get("status")
+        if not job_id_str or status not in ("done", "failed"):
+            return
+        try:
+            job_id = uuid_module.UUID(job_id_str)
+        except ValueError:
+            logger.warning("Invalid job_id in ACK: %s", job_id_str)
+            return
+
+        async with self._db_factory() as db:
+            await update_job_status(db, job_id, status)
+
+        if status == "failed":
+            error = ack.get("error", "неизвестная ошибка")
+            await self._alert(f"Ошибка печати задания {job_id_str}: {error}")
+
     async def _alert(self, message: str) -> None:
         try:
             await self._owner_bot.send_message(
