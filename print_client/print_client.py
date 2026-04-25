@@ -59,14 +59,16 @@ def render_pdf_to_image(
     import io
 
     doc = fitz.open("pdf", pdf_bytes)
-    page = doc[0]
-    target_px = int(target_width_mm * dpi / 25.4)
-    zoom = target_px / page.rect.width
-    mat = fitz.Matrix(zoom, zoom)
-    pix = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
-    img = Image.open(io.BytesIO(pix.tobytes("ppm")))
-    doc.close()
-    return img.convert("1")
+    try:
+        page = doc[0]
+        target_px = int(target_width_mm * dpi / 25.4)
+        zoom = target_px / page.rect.width
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
+        img = Image.open(io.BytesIO(pix.tobytes("ppm")))
+        return img.convert("1")
+    finally:
+        doc.close()
 
 
 def print_label(pdf_bytes: bytes, job_id: str) -> bool:
@@ -95,7 +97,11 @@ async def run():
             try:
                 logger.info("Connected")
                 async for raw in websocket:
-                    msg = json.loads(raw)
+                    try:
+                        msg = json.loads(raw)
+                    except json.JSONDecodeError:
+                        logger.warning("Non-JSON frame received, ignoring: %r", raw[:100])
+                        continue
                     if "error" in msg:
                         logger.error("Server error: %s", msg["error"])
                         continue
