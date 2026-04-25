@@ -12,14 +12,23 @@ from app.bot.florist_bot import create_florist_bot
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     owner_bot, owner_dp = create_owner_bot()
-    florist_bot, florist_dp = create_florist_bot()
     owner_task = asyncio.create_task(owner_dp.start_polling(owner_bot))
-    florist_task = asyncio.create_task(florist_dp.start_polling(florist_bot))
+
+    florist_result = create_florist_bot()
+    florist_task = None
+    florist_bot = None
+    if florist_result:
+        florist_bot, florist_dp = florist_result
+        florist_task = asyncio.create_task(florist_dp.start_polling(florist_bot))
+
     yield
+
     owner_task.cancel()
-    florist_task.cancel()
     await owner_bot.session.close()
-    await florist_bot.session.close()
+    if florist_task:
+        florist_task.cancel()
+    if florist_bot:
+        await florist_bot.session.close()
 
 
 app = FastAPI(title="BUDS Agent", version="1.0.0", lifespan=lifespan)

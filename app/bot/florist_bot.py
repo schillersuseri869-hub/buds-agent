@@ -11,7 +11,9 @@ async def cmd_start(message: Message):
     await message.answer("Флорист подключён. Ожидаю заказы.")
 
 
-def create_florist_bot() -> tuple[Bot, Dispatcher]:
+def create_florist_bot() -> tuple[Bot, Dispatcher] | None:
+    if not settings.florist_bot_token:
+        return None
     bot = Bot(token=settings.florist_bot_token)
     dp = Dispatcher()
     dp.include_router(florist_router)
