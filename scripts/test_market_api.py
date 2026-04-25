@@ -15,7 +15,7 @@ import httpx
 BASE_URL = "https://api.partner.market.yandex.ru"
 TOKEN = os.environ["MARKET_API_TOKEN"]
 CAMPAIGN_ID = os.environ["MARKET_CAMPAIGN_ID"]
-HEADERS = {"Authorization": f"Api-Key {TOKEN}", "Content-Type": "application/json"}
+HEADERS = {"Authorization": f"OAuth {TOKEN}", "Content-Type": "application/json"}
 
 
 async def check_order_stats(client: httpx.AsyncClient):
