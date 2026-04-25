@@ -153,7 +153,7 @@ class PrintAgent:
                 continue
             pdf_b64 = base64.b64encode(pdf_bytes).decode()
             sent = await send_print_job(str(job.id), pdf_b64)
-            if sent:
+            if sent and job.status != "sent":
                 async with self._db_factory() as db:
                     await update_job_status(db, job.id, "sent")
 
@@ -169,7 +169,10 @@ class PrintAgent:
             return
 
         async with self._db_factory() as db:
-            await update_job_status(db, job_id, status)
+            updated = await update_job_status(db, job_id, status)
+        if updated is None:
+            logger.warning("handle_ack: job %s not found in DB", job_id_str)
+            return
 
         if status == "failed":
             error = ack.get("error", "неизвестная ошибка")

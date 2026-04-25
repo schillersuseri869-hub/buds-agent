@@ -368,3 +368,16 @@ async def test_handle_ack_failed_alerts_owner(
     text = mock_bot.send_message.call_args[0][1]
     assert "ошибка" in text.lower()
     assert "paper jam" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_handle_ack_unknown_job_id_is_ignored(
+    fake_redis, mock_bot, mock_settings, test_engine
+):
+    db_factory = async_sessionmaker(test_engine, expire_on_commit=False)
+    agent = PrintAgent(fake_redis, db_factory, mock_bot, mock_settings)
+
+    # Send an ACK for a UUID that doesn't exist in DB
+    await agent.handle_ack({"job_id": str(uuid.UUID(int=0)), "status": "done"})
+
+    mock_bot.send_message.assert_not_awaited()
