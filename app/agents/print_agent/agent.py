@@ -1,10 +1,16 @@
 """
 Print Agent — VPS side.
 
-Current state: label download helpers.
-Future tasks add PrintJob DB operations and the PrintAgent class.
+Responsibilities: label download, PrintJob DB operations, PrintAgent class.
 """
+import uuid
+from datetime import datetime, timezone
+
 import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.print_jobs import PrintJob
 
 
 async def _fetch_label_bytes(url: str, token: str) -> bytes:
@@ -29,13 +35,6 @@ async def download_label(
         f"/campaigns/{campaign_id}/orders/{market_order_id}/delivery/labels"
     )
     return await _fetch_label_bytes(url, api_token)
-
-
-import uuid
-from datetime import datetime, timezone
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.print_jobs import PrintJob
 
 
 async def create_print_job(

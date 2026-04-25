@@ -1,7 +1,16 @@
-import pytest
+import uuid
 from unittest.mock import patch, AsyncMock
+
 import httpx
-from app.agents.print_agent.agent import download_label
+import pytest
+
+from app.agents.print_agent.agent import (
+    create_print_job,
+    download_label,
+    get_pending_jobs,
+    update_job_status,
+)
+from app.models.orders import Order
 
 
 @pytest.mark.asyncio
@@ -42,11 +51,6 @@ async def test_download_label_rejects_invalid_order_id():
 
     with pytest.raises(ValueError):
         await download_label("YM/123", 148807227, "test_token")
-
-
-import uuid
-from app.agents.print_agent.agent import create_print_job, get_pending_jobs, update_job_status
-from app.models.orders import Order
 
 
 @pytest.mark.asyncio
