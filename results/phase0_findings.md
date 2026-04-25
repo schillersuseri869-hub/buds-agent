@@ -24,11 +24,12 @@ Run date: 2026-04-25
 - Payload format confirmed: YES
 
 ## 3. Price update + quarantine
-- Status: 423 LOCKED
-- Error: `{"code":"LOCKED","message":"Partner use only default price"}`
-- **CRITICAL**: Shop is currently set to use Yandex default pricing — custom price updates via API are blocked
-- Action required: Switch shop to custom pricing mode in Partner Cabinet before Pricing Agent can work
-- Quarantine field: not yet testable until pricing mode is switched
+- Correct endpoint: `POST v2/businesses/{businessId}/offer-prices/updates` (not campaigns endpoint)
+- Status: 200 OK `{"status":"OK"}`
+- Shop uses "base prices" mode — prices must go via businessId endpoint, not campaignId
+- Payload format: `{"offers": [{"offerId": "SKU", "price": {"value": N, "currencyId": "RUR", "discountBase": N}}]}`
+- Quarantine endpoint: `POST v2/campaigns/{campaignId}/price-quarantine` — to check/confirm quarantined prices
+- Auth note: Bearer token works for this endpoint
 
 ## 4. Schedule API
 - `GET /campaigns/{id}/schedule` exists: NO (404 Not Found)
@@ -51,13 +52,12 @@ Run date: 2026-04-25
 Based on findings:
 - Economics data source: **API auto** (`/stats/orders`) — available, use for Order Agent
 - Stock update: **API** — works, use `warehouseId=0` until confirmed otherwise
-- Price update: **BLOCKED** — switch shop to custom pricing mode in Partner Cabinet first
+- Price update: **API** — use `v2/businesses/{businessId}/offer-prices/updates`
 - Schedule management: **Manual** — API endpoint does not exist (404)
 - Label source: **API download** — endpoint exists, test with real order
 - Webhook config: **Partner Cabinet only** — set URL there, not via API
 
 ## Action items before next phase
-1. In Partner Cabinet: switch pricing mode from "default" to "custom" to unblock price API
-2. Set webhook URL in Partner Cabinet → Настройки → push-уведомления → URL нашего VPS
-3. Test `/stats/orders` response with real orders to confirm `subsidies`/`commissions` structure
-4. Test order label download with real ORDER_ID
+1. Set webhook URL in Partner Cabinet → Настройки → push-уведомления → `http://<VPS_IP>:8000/webhooks/market`
+2. Test `/stats/orders` with real orders to confirm `subsidies`/`commissions` structure
+3. Test order label download with real ORDER_ID
