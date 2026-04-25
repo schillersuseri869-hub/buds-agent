@@ -1,8 +1,13 @@
 import json
+import logging
 from typing import Callable, Awaitable
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+# Single-process assumption: module-level globals are safe under asyncio's
+# single-threaded event loop. Multi-worker deployments would need Redis-backed state.
+
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 _active_client: WebSocket | None = None
 _on_connect: Callable[[], Awaitable[None]] | None = None
@@ -20,10 +25,13 @@ def set_callbacks(
 async def send_print_job(job_id: str, pdf_b64: str) -> bool:
     if _active_client is None:
         return False
-    await _active_client.send_text(
-        json.dumps({"job_id": job_id, "pdf_data": pdf_b64})
-    )
-    return True
+    try:
+        await _active_client.send_text(
+            json.dumps({"job_id": job_id, "pdf_data": pdf_b64})
+        )
+        return True
+    except Exception:
+        return False
 
 
 @router.websocket("/ws/print")
@@ -41,7 +49,11 @@ async def websocket_print(websocket: WebSocket):
     try:
         while True:
             raw = await websocket.receive_text()
-            ack = json.loads(raw)
+            try:
+                ack = json.loads(raw)
+            except json.JSONDecodeError:
+                logger.warning("Received malformed JSON from print client, skipping")
+                continue
             if _on_ack is not None:
                 await _on_ack(ack)
     except WebSocketDisconnect:

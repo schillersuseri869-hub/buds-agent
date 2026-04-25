@@ -64,7 +64,7 @@ def test_on_connect_callback_called():
         with client.websocket_connect("/ws/print"):
             pass
 
-    callback.assert_called_once()
+    callback.assert_awaited_once()
 
 
 def test_on_ack_callback_called():
@@ -76,4 +76,21 @@ def test_on_ack_callback_called():
         with client.websocket_connect("/ws/print") as ws:
             ws.send_text(json.dumps({"job_id": "abc", "status": "done"}))
 
-    ack_callback.assert_called_once_with({"job_id": "abc", "status": "done"})
+    ack_callback.assert_awaited_once_with({"job_id": "abc", "status": "done"})
+
+
+def test_malformed_json_does_not_kill_connection():
+    """Malformed JSON frame must be skipped; the connection must remain open
+    and _active_client must stay set (not cleared to None)."""
+    app = make_app()
+    ack_callback = AsyncMock()
+    ws_mod.set_callbacks(on_connect=AsyncMock(), on_ack=ack_callback)
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/print") as ws:
+            ws.send_text("not-valid-json{{{")
+            ws.send_text(json.dumps({"job_id": "xyz", "status": "done"}))
+
+    ack_callback.assert_awaited_once_with({"job_id": "xyz", "status": "done"})
+    # After normal disconnect _active_client is cleared
+    assert ws_mod._active_client is None
