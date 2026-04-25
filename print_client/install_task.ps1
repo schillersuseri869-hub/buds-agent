@@ -19,13 +19,6 @@ if (-not (Test-Path $envFile)) {
     exit 1
 }
 
-$envContent = Get-Content $envFile | Where-Object { $_ -match "^\s*\w+\s*=" }
-$envVars = @()
-foreach ($line in $envContent) {
-    $parts = $line -split "=", 2
-    $envVars += [System.Environment]::ExpandEnvironmentVariables($parts[0].Trim() + "=" + $parts[1].Trim())
-}
-
 $action = New-ScheduledTaskAction `
     -Execute $pythonPath `
     -Argument "`"$scriptPath`"" `
