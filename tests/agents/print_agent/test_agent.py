@@ -107,3 +107,23 @@ async def test_update_job_status_done_sets_completed_at(db_session):
 async def test_update_job_status_unknown_id_returns_none(db_session):
     result = await update_job_status(db_session, uuid.uuid4(), "done")
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_update_job_status_failed_sets_completed_at(db_session):
+    order = Order(market_order_id="YM-TEST-004", status="waiting")
+    db_session.add(order)
+    await db_session.commit()
+    await db_session.refresh(order)
+
+    job = await create_print_job(db_session, order.id, "redis:print:pdf:x2")
+    updated = await update_job_status(db_session, job.id, "failed")
+
+    assert updated.status == "failed"
+    assert updated.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_update_job_status_invalid_status_raises():
+    with pytest.raises(ValueError, match="Invalid status"):
+        await update_job_status(None, uuid.uuid4(), "printing")

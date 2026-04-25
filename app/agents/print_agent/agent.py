@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.print_jobs import PrintJob
 
+_VALID_STATUSES = frozenset({"pending", "sent", "done", "failed"})
+
 
 async def _fetch_label_bytes(url: str, token: str) -> bytes:
     async with httpx.AsyncClient() as client:
@@ -40,6 +42,8 @@ async def download_label(
 async def create_print_job(
     db: AsyncSession, order_id: uuid.UUID, redis_key: str
 ) -> PrintJob:
+    if not redis_key:
+        raise ValueError("redis_key must not be empty")
     job = PrintJob(order_id=order_id, status="pending", label_url=redis_key)
     db.add(job)
     await db.commit()
@@ -51,7 +55,7 @@ async def get_pending_jobs(db: AsyncSession) -> list[PrintJob]:
     result = await db.execute(
         select(PrintJob)
         .where(PrintJob.status.in_(["pending", "sent"]))
-        .order_by(PrintJob.created_at)
+        .order_by(PrintJob.created_at, PrintJob.id)
     )
     return list(result.scalars().all())
 
@@ -59,6 +63,8 @@ async def get_pending_jobs(db: AsyncSession) -> list[PrintJob]:
 async def update_job_status(
     db: AsyncSession, job_id: uuid.UUID, status: str
 ) -> PrintJob | None:
+    if status not in _VALID_STATUSES:
+        raise ValueError(f"Invalid status: {status!r}")
     result = await db.execute(select(PrintJob).where(PrintJob.id == job_id))
     job = result.scalar_one_or_none()
     if job is None:
