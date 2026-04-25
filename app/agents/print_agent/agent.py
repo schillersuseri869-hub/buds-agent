@@ -5,7 +5,6 @@ Responsibilities: label download, PrintJob DB operations, PrintAgent class.
 """
 import base64
 import logging
-import uuid
 import uuid as uuid_module
 from datetime import datetime, timezone
 
@@ -48,7 +47,7 @@ async def download_label(
 
 
 async def create_print_job(
-    db: AsyncSession, order_id: uuid.UUID, redis_key: str
+    db: AsyncSession, order_id: uuid_module.UUID, redis_key: str
 ) -> PrintJob:
     if not redis_key:
         raise ValueError("redis_key must not be empty")
@@ -69,7 +68,7 @@ async def get_pending_jobs(db: AsyncSession) -> list[PrintJob]:
 
 
 async def update_job_status(
-    db: AsyncSession, job_id: uuid.UUID, status: str
+    db: AsyncSession, job_id: uuid_module.UUID, status: str
 ) -> PrintJob | None:
     if status not in _VALID_STATUSES:
         raise ValueError(f"Invalid status: {status!r}")
@@ -120,9 +119,15 @@ class PrintAgent:
         redis_key = f"print:pdf:{job_id}"
         await self._redis.setex(redis_key, 86400, pdf_bytes)
 
+        try:
+            order_uuid = uuid_module.UUID(order_id_str)
+        except ValueError:
+            logger.error("Invalid order_id UUID in order.created: %s", order_id_str)
+            return
+
         async with self._db_factory() as db:
             job = await create_print_job(
-                db, uuid_module.UUID(order_id_str), redis_key
+                db, order_uuid, redis_key
             )
 
         pdf_b64 = base64.b64encode(pdf_bytes).decode()

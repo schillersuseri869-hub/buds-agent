@@ -1,14 +1,17 @@
+import base64
 import uuid
-from unittest.mock import patch, AsyncMock
-
+import fakeredis.aioredis
 import httpx
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.agents.print_agent.agent import (
     create_print_job,
     download_label,
     get_pending_jobs,
     update_job_status,
+    PrintAgent,
 )
 from app.models.orders import Order
 
@@ -129,13 +132,6 @@ async def test_update_job_status_invalid_status_raises():
         await update_job_status(None, uuid.uuid4(), "printing")
 
 
-import base64
-import fakeredis.aioredis
-from unittest.mock import AsyncMock, patch, MagicMock
-from sqlalchemy.ext.asyncio import async_sessionmaker
-from app.agents.print_agent.agent import PrintAgent
-
-
 @pytest.fixture
 def fake_redis():
     return fakeredis.aioredis.FakeRedis()
@@ -176,7 +172,7 @@ async def test_handle_order_created_creates_job_and_sends(
         new_callable=AsyncMock,
         return_value=fake_pdf,
     ), patch(
-        "app.api.ws_print.send_print_job",
+        "app.agents.print_agent.agent.send_print_job",
         new_callable=AsyncMock,
         return_value=True,
     ) as mock_send:
@@ -216,7 +212,7 @@ async def test_handle_order_created_alerts_when_printer_offline(
         new_callable=AsyncMock,
         return_value=b"%PDF-1.4 x",
     ), patch(
-        "app.api.ws_print.send_print_job",
+        "app.agents.print_agent.agent.send_print_job",
         new_callable=AsyncMock,
         return_value=False,
     ):
@@ -234,7 +230,6 @@ async def test_handle_order_created_alerts_when_printer_offline(
 async def test_handle_order_created_alerts_on_api_error(
     fake_redis, mock_bot, mock_settings, test_engine
 ):
-    import httpx
     db_factory = async_sessionmaker(test_engine, expire_on_commit=False)
     agent = PrintAgent(fake_redis, db_factory, mock_bot, mock_settings)
 
