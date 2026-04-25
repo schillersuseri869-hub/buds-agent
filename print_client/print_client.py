@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Runs on the florist's local PC. Connects to BUDS VPS WebSocket,
 receives print jobs, prints via ESC/POS thermal printer, sends ACK.
@@ -7,55 +6,113 @@ Setup:
     pip install -r print_client/requirements.txt
 
 Run:
-    BUDS_WS_URL=ws://YOUR_VPS_IP:8000/ws/print \
-    PRINTER_USB_VENDOR=0x04b8 \
-    PRINTER_USB_PRODUCT=0x0202 \
-    python print_client/print_client.py
+    set BUDS_WS_URL=ws://82.22.3.55:8000/ws/print
+    set PRINTER_USB_VENDOR=0x1FC9
+    set PRINTER_USB_PRODUCT=0x0082
+    pythonw print_client/print_client.py
 """
 import asyncio
+import base64
 import json
+import logging
 import os
-import urllib.request
+import sys
 import tempfile
 
-import websockets
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("buds_print")
 
 BUDS_WS_URL = os.environ.get("BUDS_WS_URL", "ws://localhost:8000/ws/print")
-PRINTER_USB_VENDOR = int(os.environ.get("PRINTER_USB_VENDOR", "0x04b8"), 16)
-PRINTER_USB_PRODUCT = int(os.environ.get("PRINTER_USB_PRODUCT", "0x0202"), 16)
+PRINTER_USB_VENDOR = int(os.environ.get("PRINTER_USB_VENDOR", "0x1FC9"), 16)
+PRINTER_USB_PRODUCT = int(os.environ.get("PRINTER_USB_PRODUCT", "0x0082"), 16)
+LOCK_FILE = os.path.join(tempfile.gettempdir(), "buds_print.lock")
 
 
-def print_label(label_url: str, job_id: str) -> bool:
+def acquire_lock(lock_path: str = LOCK_FILE) -> bool:
+    if os.path.exists(lock_path):
+        try:
+            with open(lock_path) as f:
+                pid = int(f.read().strip())
+            os.kill(pid, 0)
+            return False  # process still running
+        except (OSError, ValueError):
+            pass  # stale lock
+    with open(lock_path, "w") as f:
+        f.write(str(os.getpid()))
+    return True
+
+
+def release_lock(lock_path: str = LOCK_FILE) -> None:
+    try:
+        os.remove(lock_path)
+    except FileNotFoundError:
+        pass
+
+
+def render_pdf_to_image(
+    pdf_bytes: bytes,
+    target_width_mm: float = 58.0,
+    dpi: int = 203,
+):
+    import fitz
+    from PIL import Image
+    import io
+
+    doc = fitz.open("pdf", pdf_bytes)
+    page = doc[0]
+    target_px = int(target_width_mm * dpi / 25.4)
+    zoom = target_px / page.rect.width
+    mat = fitz.Matrix(zoom, zoom)
+    pix = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
+    img = Image.open(io.BytesIO(pix.tobytes("ppm")))
+    doc.close()
+    return img.convert("1")
+
+
+def print_label(pdf_bytes: bytes, job_id: str) -> bool:
     try:
         from escpos.printer import Usb
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
-            urllib.request.urlretrieve(label_url, f.name)
+        img = render_pdf_to_image(pdf_bytes)
         printer = Usb(PRINTER_USB_VENDOR, PRINTER_USB_PRODUCT)
-        printer.text(f"Заказ {job_id}\n")
-        printer.text(f"{label_url[:60]}\n")
+        printer.image(img)
         printer.cut()
         return True
     except Exception as exc:
-        print(f"[print_client] Print error for job {job_id}: {exc}")
+        logger.error("Print error for job %s: %s", job_id, exc)
         return False
 
 
 async def run():
-    print(f"[print_client] Connecting to {BUDS_WS_URL}")
-    async for websocket in websockets.connect(BUDS_WS_URL, ping_interval=20):
-        try:
-            print("[print_client] Connected")
-            async for raw in websocket:
-                job = json.loads(raw)
-                job_id = job.get("job_id", "unknown")
-                label_url = job.get("label_url", "")
-                print(f"[print_client] Printing job {job_id}")
-                success = print_label(label_url, job_id)
-                ack = {"job_id": job_id, "status": "done" if success else "failed"}
-                await websocket.send(json.dumps(ack))
-        except websockets.ConnectionClosed:
-            print("[print_client] Disconnected, retrying in 5s...")
-            await asyncio.sleep(5)
+    import websockets  # lazy import — not needed for tests
+
+    if not acquire_lock():
+        logger.info("Another instance is running. Exiting.")
+        sys.exit(0)
+
+    try:
+        logger.info("Connecting to %s", BUDS_WS_URL)
+        async for websocket in websockets.connect(BUDS_WS_URL, ping_interval=20):
+            try:
+                logger.info("Connected")
+                async for raw in websocket:
+                    msg = json.loads(raw)
+                    if "error" in msg:
+                        logger.error("Server error: %s", msg["error"])
+                        continue
+                    job_id = msg.get("job_id", "unknown")
+                    pdf_b64 = msg.get("pdf_data", "")
+                    pdf_bytes = base64.b64decode(pdf_b64)
+                    logger.info("Printing job %s", job_id)
+                    success = print_label(pdf_bytes, job_id)
+                    ack = {"job_id": job_id, "status": "done" if success else "failed"}
+                    if not success:
+                        ack["error"] = "ESC/POS print failed"
+                    await websocket.send(json.dumps(ack))
+            except websockets.ConnectionClosed:
+                logger.info("Disconnected, retrying in 5s...")
+                await asyncio.sleep(5)
+    finally:
+        release_lock()
 
 
 if __name__ == "__main__":
