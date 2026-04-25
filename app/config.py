@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic_settings import BaseSettings
 
 
@@ -10,8 +12,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     owner_bot_token: str
     owner_telegram_id: int
-    florist_bot_token: str
-    florist_telegram_id: int
+    florist_bot_token: Optional[str] = None
+    florist_telegram_id: Optional[int] = None
     market_api_token: str
     market_campaign_id: int
     market_client_id: str
