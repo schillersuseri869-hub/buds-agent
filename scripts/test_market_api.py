@@ -15,6 +15,7 @@ import httpx
 BASE_URL = "https://api.partner.market.yandex.ru"
 TOKEN = os.environ["MARKET_API_TOKEN"]
 CAMPAIGN_ID = os.environ["MARKET_CAMPAIGN_ID"]
+BUSINESS_ID = os.environ["MARKET_CLIENT_ID"]
 HEADERS = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
 
 
@@ -49,10 +50,10 @@ async def check_stock_update(client: httpx.AsyncClient):
 
 
 async def check_price_update(client: httpx.AsyncClient):
-    print("\n=== 3. Price update + quarantine (POST /campaigns/{id}/offer-prices/updates) ===")
-    url = f"{BASE_URL}/campaigns/{CAMPAIGN_ID}/offer-prices/updates"
+    print("\n=== 3. Price update + quarantine (POST v2/businesses/{businessId}/offer-prices/updates) ===")
+    url = f"{BASE_URL}/v2/businesses/{BUSINESS_ID}/offer-prices/updates"
     payload = {
-        "offers": [{"id": "TEST-NONEXISTENT-SKU", "price": {"value": 1, "currencyId": "RUR"}}]
+        "offers": [{"offerId": "TEST-NONEXISTENT-SKU", "price": {"value": 999, "currencyId": "RUR", "discountBase": 1399}}]
     }
     r = await client.post(url, json=payload, headers=HEADERS)
     print(f"Status: {r.status_code}")
