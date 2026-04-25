@@ -29,3 +29,44 @@ async def download_label(
         f"/campaigns/{campaign_id}/orders/{market_order_id}/delivery/labels"
     )
     return await _fetch_label_bytes(url, api_token)
+
+
+import uuid
+from datetime import datetime, timezone
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.print_jobs import PrintJob
+
+
+async def create_print_job(
+    db: AsyncSession, order_id: uuid.UUID, redis_key: str
+) -> PrintJob:
+    job = PrintJob(order_id=order_id, status="pending", label_url=redis_key)
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    return job
+
+
+async def get_pending_jobs(db: AsyncSession) -> list[PrintJob]:
+    result = await db.execute(
+        select(PrintJob)
+        .where(PrintJob.status.in_(["pending", "sent"]))
+        .order_by(PrintJob.created_at)
+    )
+    return list(result.scalars().all())
+
+
+async def update_job_status(
+    db: AsyncSession, job_id: uuid.UUID, status: str
+) -> PrintJob | None:
+    result = await db.execute(select(PrintJob).where(PrintJob.id == job_id))
+    job = result.scalar_one_or_none()
+    if job is None:
+        return None
+    job.status = status
+    if status in ("done", "failed"):
+        job.completed_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(job)
+    return job
