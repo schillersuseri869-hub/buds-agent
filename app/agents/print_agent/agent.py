@@ -1,3 +1,9 @@
+"""
+Print Agent — VPS side.
+
+Current state: label download helpers.
+Future tasks add PrintJob DB operations and the PrintAgent class.
+"""
 import httpx
 
 
@@ -16,6 +22,8 @@ async def _fetch_label_bytes(url: str, token: str) -> bytes:
 async def download_label(
     market_order_id: str, campaign_id: int, api_token: str
 ) -> bytes:
+    if not market_order_id or "/" in market_order_id:
+        raise ValueError(f"Invalid market_order_id: {market_order_id!r}")
     url = (
         f"https://api.partner.market.yandex.ru"
         f"/campaigns/{campaign_id}/orders/{market_order_id}/delivery/labels"

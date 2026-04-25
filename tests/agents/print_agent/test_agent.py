@@ -11,9 +11,13 @@ async def test_download_label_returns_bytes():
         "app.agents.print_agent.agent._fetch_label_bytes",
         new_callable=AsyncMock,
         return_value=fake_pdf,
-    ):
+    ) as mock_fetch:
         result = await download_label("YM-123", 148807227, "test_token")
     assert result == fake_pdf
+    mock_fetch.assert_awaited_once_with(
+        "https://api.partner.market.yandex.ru/campaigns/148807227/orders/YM-123/delivery/labels",
+        "test_token",
+    )
 
 
 @pytest.mark.asyncio
@@ -29,3 +33,12 @@ async def test_download_label_raises_on_http_error():
     ):
         with pytest.raises(httpx.HTTPStatusError):
             await download_label("UNKNOWN", 148807227, "test_token")
+
+
+@pytest.mark.asyncio
+async def test_download_label_rejects_invalid_order_id():
+    with pytest.raises(ValueError):
+        await download_label("", 148807227, "test_token")
+
+    with pytest.raises(ValueError):
+        await download_label("YM/123", 148807227, "test_token")
