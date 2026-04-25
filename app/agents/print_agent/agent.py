@@ -3,14 +3,22 @@ Print Agent — VPS side.
 
 Responsibilities: label download, PrintJob DB operations, PrintAgent class.
 """
+import base64
+import logging
 import uuid
+import uuid as uuid_module
 from datetime import datetime, timezone
 
 import httpx
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from redis.asyncio import Redis
+from aiogram import Bot
 
 from app.models.print_jobs import PrintJob
+from app.api.ws_print import send_print_job
+
+logger = logging.getLogger(__name__)
 
 _VALID_STATUSES = frozenset({"pending", "sent", "done", "failed"})
 
@@ -75,3 +83,64 @@ async def update_job_status(
     await db.commit()
     await db.refresh(job)
     return job
+
+
+class PrintAgent:
+    def __init__(
+        self,
+        redis: Redis,
+        db_factory: async_sessionmaker,
+        owner_bot: Bot,
+        settings,
+    ):
+        self._redis = redis
+        self._db_factory = db_factory
+        self._owner_bot = owner_bot
+        self._settings = settings
+
+    async def handle_order_created(self, channel: str, data: dict) -> None:
+        market_order_id = data.get("market_order_id")
+        order_id_str = data.get("order_id")
+        if not market_order_id or not order_id_str:
+            logger.error("order.created missing fields: %s", data)
+            return
+
+        try:
+            pdf_bytes = await download_label(
+                market_order_id,
+                self._settings.market_campaign_id,
+                self._settings.market_api_token,
+            )
+        except Exception as exc:
+            logger.error("Label download failed for %s: %s", market_order_id, exc)
+            await self._alert(f"Не удалось скачать ярлык заказа #{market_order_id}")
+            return
+
+        job_id = str(uuid_module.uuid4())
+        redis_key = f"print:pdf:{job_id}"
+        await self._redis.setex(redis_key, 86400, pdf_bytes)
+
+        async with self._db_factory() as db:
+            job = await create_print_job(
+                db, uuid_module.UUID(order_id_str), redis_key
+            )
+
+        pdf_b64 = base64.b64encode(pdf_bytes).decode()
+        sent = await send_print_job(str(job.id), pdf_b64)
+
+        if sent:
+            async with self._db_factory() as db:
+                await update_job_status(db, job.id, "sent")
+        else:
+            await self._alert(
+                f"Принтер офлайн. Ярлык заказа #{market_order_id} "
+                f"будет напечатан при подключении."
+            )
+
+    async def _alert(self, message: str) -> None:
+        try:
+            await self._owner_bot.send_message(
+                self._settings.owner_telegram_id, message
+            )
+        except Exception as exc:
+            logger.error("Failed to send alert: %s", exc)

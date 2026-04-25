@@ -127,3 +127,137 @@ async def test_update_job_status_failed_sets_completed_at(db_session):
 async def test_update_job_status_invalid_status_raises():
     with pytest.raises(ValueError, match="Invalid status"):
         await update_job_status(None, uuid.uuid4(), "printing")
+
+
+import base64
+import fakeredis.aioredis
+from unittest.mock import AsyncMock, patch, MagicMock
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from app.agents.print_agent.agent import PrintAgent
+
+
+@pytest.fixture
+def fake_redis():
+    return fakeredis.aioredis.FakeRedis()
+
+
+@pytest.fixture
+def mock_settings():
+    s = MagicMock()
+    s.market_campaign_id = 148807227
+    s.market_api_token = "test_token"
+    s.owner_telegram_id = 123456789
+    return s
+
+
+@pytest.fixture
+def mock_bot():
+    return AsyncMock()
+
+
+@pytest.mark.asyncio
+async def test_handle_order_created_creates_job_and_sends(
+    fake_redis, mock_bot, mock_settings, test_engine
+):
+    db_factory = async_sessionmaker(test_engine, expire_on_commit=False)
+    agent = PrintAgent(fake_redis, db_factory, mock_bot, mock_settings)
+
+    # Need an Order in DB first since PrintJob.order_id is FK
+    from sqlalchemy.ext.asyncio import AsyncSession
+    async with db_factory() as db:
+        order = Order(market_order_id="YM-SEND-001", status="waiting")
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+
+    fake_pdf = b"%PDF-1.4 fakedata"
+    with patch(
+        "app.agents.print_agent.agent._fetch_label_bytes",
+        new_callable=AsyncMock,
+        return_value=fake_pdf,
+    ), patch(
+        "app.api.ws_print.send_print_job",
+        new_callable=AsyncMock,
+        return_value=True,
+    ) as mock_send:
+        await agent.handle_order_created(
+            "order.created",
+            {"order_id": str(order.id), "market_order_id": "YM-SEND-001"},
+        )
+
+    mock_send.assert_awaited_once()
+    call_args = mock_send.call_args
+    assert base64.b64decode(call_args[0][1]) == fake_pdf
+
+    async with db_factory() as db:
+        from sqlalchemy import select
+        from app.models.print_jobs import PrintJob
+        result = await db.execute(select(PrintJob).where(PrintJob.order_id == order.id))
+        jobs = result.scalars().all()
+    assert len(jobs) == 1
+    assert jobs[0].status == "sent"
+
+
+@pytest.mark.asyncio
+async def test_handle_order_created_alerts_when_printer_offline(
+    fake_redis, mock_bot, mock_settings, test_engine
+):
+    db_factory = async_sessionmaker(test_engine, expire_on_commit=False)
+    agent = PrintAgent(fake_redis, db_factory, mock_bot, mock_settings)
+
+    async with db_factory() as db:
+        order = Order(market_order_id="YM-OFFLINE-001", status="waiting")
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+
+    with patch(
+        "app.agents.print_agent.agent._fetch_label_bytes",
+        new_callable=AsyncMock,
+        return_value=b"%PDF-1.4 x",
+    ), patch(
+        "app.api.ws_print.send_print_job",
+        new_callable=AsyncMock,
+        return_value=False,
+    ):
+        await agent.handle_order_created(
+            "order.created",
+            {"order_id": str(order.id), "market_order_id": "YM-OFFLINE-001"},
+        )
+
+    mock_bot.send_message.assert_awaited_once()
+    text = mock_bot.send_message.call_args[0][1]
+    assert "офлайн" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_handle_order_created_alerts_on_api_error(
+    fake_redis, mock_bot, mock_settings, test_engine
+):
+    import httpx
+    db_factory = async_sessionmaker(test_engine, expire_on_commit=False)
+    agent = PrintAgent(fake_redis, db_factory, mock_bot, mock_settings)
+
+    async with db_factory() as db:
+        order = Order(market_order_id="YM-ERR-001", status="waiting")
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+
+    with patch(
+        "app.agents.print_agent.agent._fetch_label_bytes",
+        new_callable=AsyncMock,
+        side_effect=httpx.HTTPStatusError(
+            "404",
+            request=httpx.Request("GET", "http://x"),
+            response=httpx.Response(404),
+        ),
+    ):
+        await agent.handle_order_created(
+            "order.created",
+            {"order_id": str(order.id), "market_order_id": "YM-ERR-001"},
+        )
+
+    mock_bot.send_message.assert_awaited_once()
+    text = mock_bot.send_message.call_args[0][1]
+    assert "ярлык" in text.lower()
