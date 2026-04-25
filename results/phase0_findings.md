@@ -58,6 +58,6 @@ Based on findings:
 - Webhook config: **Partner Cabinet only** — set URL there, not via API
 
 ## Action items before next phase
-1. Set webhook URL in Partner Cabinet → Настройки → push-уведомления → `http://<VPS_IP>:8000/webhooks/market`
+1. Set webhook URL in Partner Cabinet → Настройки → push-уведомления → `http://82.22.3.55:8000/webhooks/market`
 2. Test `/stats/orders` with real orders to confirm `subsidies`/`commissions` structure
 3. Test order label download with real ORDER_ID
