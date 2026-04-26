@@ -27,8 +27,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("buds_print")
 
 BUDS_WS_URL = os.environ.get("BUDS_WS_URL", "ws://localhost:8000/ws/print")
-PRINTER_USB_VENDOR = int(os.environ.get("PRINTER_USB_VENDOR", "0x1FC9"), 16)
-PRINTER_USB_PRODUCT = int(os.environ.get("PRINTER_USB_PRODUCT", "0x0082"), 16)
+PRINTER_NAME = os.environ.get("PRINTER_NAME", "Xprinter Xp-365B")
 LOCK_FILE = os.path.join(tempfile.gettempdir(), "buds_print.lock")
 
 
@@ -75,23 +74,11 @@ def render_pdf_to_image(
         doc.close()
 
 
-def _usb_backend():
-    try:
-        import libusb_package
-        import usb.backend.libusb1
-        return usb.backend.libusb1.get_backend(find_library=libusb_package.find_library)
-    except Exception:
-        return None
-
-
 def print_label(pdf_bytes: bytes, job_id: str) -> bool:
     try:
-        import usb.core
-        from escpos.printer import Usb
+        from escpos.printer import Win32Raw
         img = render_pdf_to_image(pdf_bytes)
-        backend = _usb_backend()
-        usb_args = {"backend": backend} if backend is not None else {}
-        printer = Usb(PRINTER_USB_VENDOR, PRINTER_USB_PRODUCT, in_ep=0x81, usb_args=usb_args)
+        printer = Win32Raw(PRINTER_NAME)
         printer.image(img)
         printer.cut()
         return True
