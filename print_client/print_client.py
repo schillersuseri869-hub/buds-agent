@@ -75,11 +75,22 @@ def render_pdf_to_image(
         doc.close()
 
 
+def _usb_backend():
+    try:
+        import libusb_package
+        import usb.backend.libusb1
+        return usb.backend.libusb1.get_backend(find_library=libusb_package.find_library)
+    except Exception:
+        return None
+
+
 def print_label(pdf_bytes: bytes, job_id: str) -> bool:
     try:
+        import usb.core
         from escpos.printer import Usb
         img = render_pdf_to_image(pdf_bytes)
-        printer = Usb(PRINTER_USB_VENDOR, PRINTER_USB_PRODUCT)
+        backend = _usb_backend()
+        printer = Usb(PRINTER_USB_VENDOR, PRINTER_USB_PRODUCT, backend=backend)
         printer.image(img)
         printer.cut()
         return True
