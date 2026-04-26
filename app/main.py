@@ -1,11 +1,12 @@
 import asyncio
+import base64
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from redis.asyncio import Redis
 
 from app.api.webhooks import router as webhooks_router
-from app.api.ws_print import router as ws_router, set_callbacks
+from app.api.ws_print import router as ws_router, set_callbacks, send_print_job
 from app.bot.owner_bot import create_owner_bot
 from app.bot.florist_bot import create_florist_bot
 from app.core.event_bus import EventBus
@@ -58,3 +59,19 @@ app.include_router(ws_router)
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.post("/admin/test-print")
+async def test_print():
+    import fitz
+    doc = fitz.open()
+    page = doc.new_page(width=165, height=250)
+    page.insert_text((10, 60), "BUDS TEST PRINT", fontsize=18)
+    page.insert_text((10, 100), "Принтер работает!", fontsize=14)
+    pdf_bytes = doc.tobytes()
+    doc.close()
+    pdf_b64 = base64.b64encode(pdf_bytes).decode()
+    sent = await send_print_job("test-001", pdf_b64)
+    if not sent:
+        raise HTTPException(status_code=503, detail="Print client not connected")
+    return {"status": "sent"}
