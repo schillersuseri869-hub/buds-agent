@@ -1,4 +1,12 @@
 import os
+
+# Provide required env vars before any app modules load Settings()
+os.environ.setdefault("OWNER_BOT_TOKEN", "fake:token_for_tests")
+os.environ.setdefault("OWNER_TELEGRAM_ID", "111111")
+os.environ.setdefault("MARKET_API_TOKEN", "fake_market_token")
+os.environ.setdefault("MARKET_CAMPAIGN_ID", "148807227")
+os.environ.setdefault("MARKET_CLIENT_ID", "fake_client_id")
+
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
