@@ -79,14 +79,12 @@ def print_label(pdf_bytes: bytes, job_id: str) -> bool:
         import win32print
         import win32ui
         from PIL import ImageWin
-        img = render_pdf_to_image(pdf_bytes).rotate(90, expand=True).convert("RGB")
+        img = render_pdf_to_image(pdf_bytes).convert("RGB")
         hdc = win32ui.CreateDC()
         hdc.CreatePrinterDC(PRINTER_NAME)
-        dpi_x = hdc.GetDeviceCaps(88)  # LOGPIXELSX
-        dpi_y = hdc.GetDeviceCaps(90)  # LOGPIXELSY
-        src_dpi = 203
-        draw_w = int(img.width * dpi_x / src_dpi)
-        draw_h = int(img.height * dpi_y / src_dpi)
+        printer_w = hdc.GetDeviceCaps(8)   # HORZRES — printable width in pixels
+        draw_w = printer_w
+        draw_h = int(img.height * printer_w / img.width)
         hdc.StartDoc(job_id)
         hdc.StartPage()
         dib = ImageWin.Dib(img)

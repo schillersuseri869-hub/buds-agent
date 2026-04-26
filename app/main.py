@@ -78,9 +78,9 @@ async def health():
 async def test_print():
     import fitz
     doc = fitz.open()
-    page = doc.new_page(width=165, height=250)
-    page.insert_text((10, 60), "BUDS TEST PRINT", fontsize=18)
-    page.insert_text((10, 100), "Принтер работает!", fontsize=14)
+    page = doc.new_page(width=164, height=113)  # 58mm x 40mm
+    page.insert_text((10, 40), "BUDS TEST PRINT", fontsize=14)
+    page.insert_text((10, 70), "Принтер OK", fontsize=12)
     pdf_bytes = doc.tobytes()
     doc.close()
     pdf_b64 = base64.b64encode(pdf_bytes).decode()
