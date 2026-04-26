@@ -91,7 +91,7 @@ def print_label(pdf_bytes: bytes, job_id: str) -> bool:
         img = render_pdf_to_image(pdf_bytes)
         backend = _usb_backend()
         usb_args = {"backend": backend} if backend is not None else {}
-        printer = Usb(PRINTER_USB_VENDOR, PRINTER_USB_PRODUCT, usb_args=usb_args)
+        printer = Usb(PRINTER_USB_VENDOR, PRINTER_USB_PRODUCT, in_ep=0x81, usb_args=usb_args)
         printer.image(img)
         printer.cut()
         return True
