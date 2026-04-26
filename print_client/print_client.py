@@ -90,7 +90,8 @@ def print_label(pdf_bytes: bytes, job_id: str) -> bool:
         from escpos.printer import Usb
         img = render_pdf_to_image(pdf_bytes)
         backend = _usb_backend()
-        printer = Usb(PRINTER_USB_VENDOR, PRINTER_USB_PRODUCT, backend=backend)
+        usb_args = {"backend": backend} if backend is not None else {}
+        printer = Usb(PRINTER_USB_VENDOR, PRINTER_USB_PRODUCT, usb_args=usb_args)
         printer.image(img)
         printer.cut()
         return True
