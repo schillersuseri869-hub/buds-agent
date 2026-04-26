@@ -76,11 +76,21 @@ def render_pdf_to_image(
 
 def print_label(pdf_bytes: bytes, job_id: str) -> bool:
     try:
-        from escpos.printer import Win32Raw
-        img = render_pdf_to_image(pdf_bytes)
-        printer = Win32Raw(PRINTER_NAME)
-        printer.image(img)
-        printer.cut()
+        import win32print
+        import win32ui
+        from PIL import ImageWin
+        img = render_pdf_to_image(pdf_bytes).convert("RGB")
+        hdc = win32ui.CreateDC()
+        hdc.CreatePrinterDC(PRINTER_NAME)
+        printer_w = hdc.GetDeviceCaps(8)   # HORZRES
+        printer_h = hdc.GetDeviceCaps(10)  # VERTRES
+        hdc.StartDoc(job_id)
+        hdc.StartPage()
+        dib = ImageWin.Dib(img)
+        dib.draw(hdc.GetHandleOutput(), (0, 0, printer_w, printer_h))
+        hdc.EndPage()
+        hdc.EndDoc()
+        hdc.DeleteDC()
         return True
     except Exception as exc:
         logger.error("Print error for job %s: %s", job_id, exc)
