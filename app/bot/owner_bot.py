@@ -24,6 +24,16 @@ def register_order_callbacks(order_agent) -> None:
         await order_agent.handle_button_callback(callback)
 
 
+def register_stock_commands(flower_stock_agent) -> None:
+    @owner_router.message()
+    async def handle_stock_message(message: Message):
+        if message.from_user is None:
+            return
+        response = await flower_stock_agent.handle_telegram_message(message.text or "")
+        if response:
+            await message.answer(response)
+
+
 def create_owner_bot() -> tuple[Bot, Dispatcher]:
     bot = Bot(token=settings.owner_bot_token)
     dp = Dispatcher()
