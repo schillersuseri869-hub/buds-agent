@@ -35,7 +35,7 @@ async def _fetch_label_bytes(url: str, token: str) -> bytes:
 
 
 async def download_label(
-    market_order_id: str, campaign_id: int, api_token: str
+    market_order_id: str, campaign_id: int, api_token: str, format: str | None = None
 ) -> bytes:
     if not market_order_id or "/" in market_order_id:
         raise ValueError(f"Invalid market_order_id: {market_order_id!r}")
@@ -43,6 +43,8 @@ async def download_label(
         f"https://api.partner.market.yandex.ru"
         f"/campaigns/{campaign_id}/orders/{market_order_id}/delivery/labels"
     )
+    if format:
+        url += f"?format={format}"
     return await _fetch_label_bytes(url, api_token)
 
 

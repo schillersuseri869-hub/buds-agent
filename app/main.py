@@ -130,18 +130,19 @@ async def label_info(market_order_id: str):
 
 
 @app.post("/admin/print-order/{market_order_id}")
-async def print_order(market_order_id: str):
+async def print_order(market_order_id: str, format: str | None = None):
     from app.agents.print_agent.agent import download_label
     try:
         pdf_bytes = await download_label(
             market_order_id,
             settings.market_campaign_id,
             settings.market_api_token,
+            format=format,
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Label download failed: {exc}")
     pdf_b64 = base64.b64encode(pdf_bytes).decode()
-    sent = await send_print_job(f"admin-{market_order_id}", pdf_b64)
+    sent = await send_print_job(f"admin-{market_order_id}-{format or 'default'}", pdf_b64)
     if not sent:
         raise HTTPException(status_code=503, detail="Print client not connected")
-    return {"status": "sent", "market_order_id": market_order_id}
+    return {"status": "sent", "market_order_id": market_order_id, "format": format}
