@@ -99,15 +99,30 @@ def print_label(pdf_bytes: bytes, job_id: str) -> bool:
     try:
         import win32ui
         from PIL import ImageWin
-        img = render_pdf_to_image(pdf_bytes).rotate(90, expand=True).convert("RGB")
         hdc = win32ui.CreateDC()
         hdc.CreatePrinterDC(PRINTER_NAME)
-        dpi_x = hdc.GetDeviceCaps(88)  # LOGPIXELSX
-        dpi_y = hdc.GetDeviceCaps(90)  # LOGPIXELSY
-        draw_w = int(img.width * dpi_x / 203)
-        draw_h = int(img.height * dpi_y / 203)
-        logger.info("Printing job %s: img=%dx%d draw=%dx%d printer_dpi=%dx%d",
-                    job_id, img.width, img.height, draw_w, draw_h, dpi_x, dpi_y)
+        dpi_x = hdc.GetDeviceCaps(88)   # LOGPIXELSX
+        dpi_y = hdc.GetDeviceCaps(90)   # LOGPIXELSY
+        horzres = hdc.GetDeviceCaps(8)  # printable width in device pixels
+        vertres = hdc.GetDeviceCaps(10) # printable height in device pixels
+
+        # Actual printable dimensions in mm (may be less than paper size due to margins)
+        printable_w_mm = horzres * 25.4 / dpi_x
+        printable_h_mm = vertres * 25.4 / dpi_y
+
+        # render_pdf_to_image renders portrait (sticker_width × sticker_height),
+        # then we rotate 90°: img.width → paper-width direction, img.height → feed direction.
+        render_w = min(STICKER_WIDTH_MM, printable_h_mm)   # feed direction
+        render_h = min(STICKER_HEIGHT_MM, printable_w_mm)  # paper-width direction
+
+        img = render_pdf_to_image(pdf_bytes, render_w, render_h).rotate(90, expand=True).convert("RGB")
+
+        draw_w = min(int(img.width * dpi_x / 203), horzres)
+        draw_h = min(int(img.height * dpi_y / 203), vertres)
+        logger.info(
+            "Printing job %s: printable=%.1fx%.1fmm img=%dx%d draw=%dx%d dpi=%dx%d",
+            job_id, printable_w_mm, printable_h_mm, img.width, img.height, draw_w, draw_h, dpi_x, dpi_y,
+        )
         hdc.StartDoc(job_id)
         hdc.StartPage()
         dib = ImageWin.Dib(img)
