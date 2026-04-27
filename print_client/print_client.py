@@ -52,9 +52,14 @@ def release_lock(lock_path: str = LOCK_FILE) -> None:
         pass
 
 
+STICKER_WIDTH_MM = float(os.environ.get("STICKER_WIDTH_MM", "58.0"))
+STICKER_HEIGHT_MM = float(os.environ.get("STICKER_HEIGHT_MM", "40.0"))
+
+
 def render_pdf_to_image(
     pdf_bytes: bytes,
-    target_width_mm: float = 58.0,
+    sticker_width_mm: float = STICKER_WIDTH_MM,
+    sticker_height_mm: float = STICKER_HEIGHT_MM,
     dpi: int = 203,
 ):
     import fitz
@@ -64,11 +69,27 @@ def render_pdf_to_image(
     doc = fitz.open("pdf", pdf_bytes)
     try:
         page = doc[0]
-        target_px = int(target_width_mm * dpi / 25.4)
-        zoom = target_px / page.rect.width
+        # Account for page rotation: swap w/h if rotated 90/270
+        rotation = page.rotation
+        if rotation in (90, 270):
+            page_w_pt = page.rect.height
+            page_h_pt = page.rect.width
+        else:
+            page_w_pt = page.rect.width
+            page_h_pt = page.rect.height
+
+        target_w_px = sticker_width_mm * dpi / 25.4
+        target_h_px = sticker_height_mm * dpi / 25.4
+        zoom = min(target_w_px / page_w_pt, target_h_px / page_h_pt)
+
         mat = fitz.Matrix(zoom, zoom)
         pix = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
         img = Image.open(io.BytesIO(pix.tobytes("ppm")))
+        logger.info(
+            "PDF rendered: page=%.1fx%.1fmm sticker=%.1fx%.1fmm zoom=%.3f img=%dx%d",
+            page_w_pt * 25.4 / 72, page_h_pt * 25.4 / 72,
+            sticker_width_mm, sticker_height_mm, zoom, img.width, img.height,
+        )
         return img.convert("1")
     finally:
         doc.close()
@@ -76,20 +97,17 @@ def render_pdf_to_image(
 
 def print_label(pdf_bytes: bytes, job_id: str) -> bool:
     try:
-        import win32print
         import win32ui
         from PIL import ImageWin
-        img = render_pdf_to_image(pdf_bytes).rotate(90, expand=True).convert("RGB")
+        img = render_pdf_to_image(pdf_bytes).convert("RGB")
         hdc = win32ui.CreateDC()
         hdc.CreatePrinterDC(PRINTER_NAME)
-        dpi_x = hdc.GetDeviceCaps(88)   # LOGPIXELSX
-        dpi_y = hdc.GetDeviceCaps(90)   # LOGPIXELSY
-        horzres = hdc.GetDeviceCaps(8)  # HORZRES
-        vertres = hdc.GetDeviceCaps(10) # VERTRES
-        logger.info("Printer: dpi_x=%s dpi_y=%s horzres=%s vertres=%s img=%sx%s",
-                    dpi_x, dpi_y, horzres, vertres, img.width, img.height)
+        dpi_x = hdc.GetDeviceCaps(88)  # LOGPIXELSX
+        dpi_y = hdc.GetDeviceCaps(90)  # LOGPIXELSY
         draw_w = int(img.width * dpi_x / 203)
         draw_h = int(img.height * dpi_y / 203)
+        logger.info("Printing job %s: img=%dx%d draw=%dx%d printer_dpi=%dx%d",
+                    job_id, img.width, img.height, draw_w, draw_h, dpi_x, dpi_y)
         hdc.StartDoc(job_id)
         hdc.StartPage()
         dib = ImageWin.Dib(img)
