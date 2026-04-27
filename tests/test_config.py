@@ -30,6 +30,19 @@ def test_settings_loads_from_env():
         assert s.market_campaign_id == 12345
 
 
+def test_settings_has_market_warehouse_id():
+    from app.config import Settings
+    s = Settings(
+        owner_bot_token="x",
+        owner_telegram_id=1,
+        market_api_token="t",
+        market_campaign_id=1,
+        market_client_id="c",
+        market_warehouse_id=999,
+    )
+    assert s.market_warehouse_id == 999
+
+
 def test_database_url_format():
     env = {
         "POSTGRES_HOST": "myhost",
