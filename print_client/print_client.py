@@ -52,8 +52,8 @@ def release_lock(lock_path: str = LOCK_FILE) -> None:
         pass
 
 
-STICKER_WIDTH_MM = float(os.environ.get("STICKER_WIDTH_MM", "58.0"))
-STICKER_HEIGHT_MM = float(os.environ.get("STICKER_HEIGHT_MM", "40.0"))
+STICKER_WIDTH_MM = float(os.environ.get("STICKER_WIDTH_MM", "40.0"))
+STICKER_HEIGHT_MM = float(os.environ.get("STICKER_HEIGHT_MM", "58.0"))
 
 
 def render_pdf_to_image(
@@ -99,7 +99,7 @@ def print_label(pdf_bytes: bytes, job_id: str) -> bool:
     try:
         import win32ui
         from PIL import ImageWin
-        img = render_pdf_to_image(pdf_bytes).convert("RGB")
+        img = render_pdf_to_image(pdf_bytes).rotate(90, expand=True).convert("RGB")
         hdc = win32ui.CreateDC()
         hdc.CreatePrinterDC(PRINTER_NAME)
         dpi_x = hdc.GetDeviceCaps(88)  # LOGPIXELSX
