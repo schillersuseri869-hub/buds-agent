@@ -102,6 +102,33 @@ async def test_print():
     return {"status": "sent"}
 
 
+@app.get("/admin/label-info/{market_order_id}")
+async def label_info(market_order_id: str):
+    import fitz
+    from app.agents.print_agent.agent import download_label
+    try:
+        pdf_bytes = await download_label(
+            market_order_id,
+            settings.market_campaign_id,
+            settings.market_api_token,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Label download failed: {exc}")
+    doc = fitz.open("pdf", pdf_bytes)
+    pages = []
+    for i, page in enumerate(doc):
+        r = page.rect
+        pages.append({
+            "page": i,
+            "width_pt": round(r.width, 2),
+            "height_pt": round(r.height, 2),
+            "width_mm": round(r.width * 25.4 / 72, 2),
+            "height_mm": round(r.height * 25.4 / 72, 2),
+        })
+    doc.close()
+    return {"size_bytes": len(pdf_bytes), "pages": pages}
+
+
 @app.post("/admin/print-order/{market_order_id}")
 async def print_order(market_order_id: str):
     from app.agents.print_agent.agent import download_label
