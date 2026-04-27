@@ -69,25 +69,16 @@ def render_pdf_to_image(
     doc = fitz.open("pdf", pdf_bytes)
     try:
         page = doc[0]
-        # Account for page rotation: swap w/h if rotated 90/270
-        rotation = page.rotation
-        if rotation in (90, 270):
-            page_w_pt = page.rect.height
-            page_h_pt = page.rect.width
-        else:
-            page_w_pt = page.rect.width
-            page_h_pt = page.rect.height
-
+        # page.rect already reflects display orientation (PyMuPDF applies /Rotate)
         target_w_px = sticker_width_mm * dpi / 25.4
         target_h_px = sticker_height_mm * dpi / 25.4
-        zoom = min(target_w_px / page_w_pt, target_h_px / page_h_pt)
-
+        zoom = min(target_w_px / page.rect.width, target_h_px / page.rect.height)
         mat = fitz.Matrix(zoom, zoom)
         pix = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
         img = Image.open(io.BytesIO(pix.tobytes("ppm")))
         logger.info(
-            "PDF rendered: page=%.1fx%.1fmm sticker=%.1fx%.1fmm zoom=%.3f img=%dx%d",
-            page_w_pt * 25.4 / 72, page_h_pt * 25.4 / 72,
+            "PDF rendered: page=%.1fx%.1fmm target=%.1fx%.1fmm zoom=%.3f img=%dx%d",
+            page.rect.width * 25.4 / 72, page.rect.height * 25.4 / 72,
             sticker_width_mm, sticker_height_mm, zoom, img.width, img.height,
         )
         return img.convert("1")
@@ -99,29 +90,19 @@ def print_label(pdf_bytes: bytes, job_id: str) -> bool:
     try:
         import win32ui
         from PIL import ImageWin
+        # Render portrait sticker (40mm × 58mm), rotate 90° → landscape on tape (58mm × 40mm)
+        img = render_pdf_to_image(pdf_bytes, STICKER_WIDTH_MM, STICKER_HEIGHT_MM).rotate(90, expand=True).convert("RGB")
         hdc = win32ui.CreateDC()
         hdc.CreatePrinterDC(PRINTER_NAME)
         dpi_x = hdc.GetDeviceCaps(88)   # LOGPIXELSX
         dpi_y = hdc.GetDeviceCaps(90)   # LOGPIXELSY
-        horzres = hdc.GetDeviceCaps(8)  # printable width in device pixels
-        vertres = hdc.GetDeviceCaps(10) # printable height in device pixels
-
-        # Actual printable dimensions in mm (may be less than paper size due to margins)
-        printable_w_mm = horzres * 25.4 / dpi_x
-        printable_h_mm = vertres * 25.4 / dpi_y
-
-        # render_pdf_to_image renders portrait (sticker_width × sticker_height),
-        # then we rotate 90°: img.width → paper-width direction, img.height → feed direction.
-        render_w = min(STICKER_WIDTH_MM, printable_h_mm)   # feed direction
-        render_h = min(STICKER_HEIGHT_MM, printable_w_mm)  # paper-width direction
-
-        img = render_pdf_to_image(pdf_bytes, render_w, render_h).rotate(90, expand=True).convert("RGB")
-
-        draw_w = min(int(img.width * dpi_x / 203), horzres)
-        draw_h = min(int(img.height * dpi_y / 203), vertres)
+        horzres = hdc.GetDeviceCaps(8)
+        vertres = hdc.GetDeviceCaps(10)
+        draw_w = int(img.width * dpi_x / 203)
+        draw_h = int(img.height * dpi_y / 203)
         logger.info(
-            "Printing job %s: printable=%.1fx%.1fmm img=%dx%d draw=%dx%d dpi=%dx%d",
-            job_id, printable_w_mm, printable_h_mm, img.width, img.height, draw_w, draw_h, dpi_x, dpi_y,
+            "Printing %s: img=%dx%d draw=%dx%d printable=%dx%d dpi=%dx%d",
+            job_id, img.width, img.height, draw_w, draw_h, horzres, vertres, dpi_x, dpi_y,
         )
         hdc.StartDoc(job_id)
         hdc.StartPage()
