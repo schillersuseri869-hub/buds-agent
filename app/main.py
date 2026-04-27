@@ -7,13 +7,18 @@ from redis.asyncio import Redis
 
 from app.api.webhooks import router as webhooks_router
 from app.api.ws_print import router as ws_router, set_callbacks, send_print_job
-from app.bot.owner_bot import create_owner_bot, register_order_callbacks as register_owner_callbacks
+from app.bot.owner_bot import (
+    create_owner_bot,
+    register_order_callbacks as register_owner_callbacks,
+    register_stock_commands,
+)
 from app.bot.florist_bot import create_florist_bot, register_order_callbacks as register_florist_callbacks
 from app.core.event_bus import EventBus
 from app.database import AsyncSessionLocal
 from app.config import settings
 from app.agents.print_agent.agent import PrintAgent
 from app.agents.order_agent.agent import OrderAgent
+from app.agents.flower_stock.agent import FlowerStockAgent
 
 
 @asynccontextmanager
@@ -47,9 +52,16 @@ async def lifespan(app: FastAPI):
     await event_bus.subscribe("order.delivered", order_agent.handle_order_status)
     await order_agent.recover_timers()
 
+    flower_stock_agent = FlowerStockAgent(AsyncSessionLocal, owner_bot, settings)
+    await event_bus.subscribe("order.created", flower_stock_agent.handle_order_created)
+    await event_bus.subscribe("order.ready", flower_stock_agent.handle_order_ready)
+    await event_bus.subscribe("order.cancelled", flower_stock_agent.handle_order_released)
+    await event_bus.subscribe("order.timeout", flower_stock_agent.handle_order_released)
+
     register_owner_callbacks(order_agent)
     if florist_bot:
         register_florist_callbacks(order_agent)
+    register_stock_commands(flower_stock_agent)
 
     yield
 
