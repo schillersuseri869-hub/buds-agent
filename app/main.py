@@ -11,6 +11,7 @@ from app.bot.owner_bot import (
     create_owner_bot,
     register_order_callbacks as register_owner_callbacks,
     register_stock_commands,
+    register_pricing_callbacks,
 )
 from app.bot.florist_bot import create_florist_bot, register_order_callbacks as register_florist_callbacks
 from app.core.event_bus import EventBus
@@ -19,6 +20,8 @@ from app.config import settings
 from app.agents.print_agent.agent import PrintAgent
 from app.agents.order_agent.agent import OrderAgent
 from app.agents.flower_stock.agent import FlowerStockAgent
+from app.agents.pricing_agent.agent import PricingAgent
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 
 @asynccontextmanager
@@ -63,8 +66,15 @@ async def lifespan(app: FastAPI):
         register_florist_callbacks(order_agent)
     register_stock_commands(flower_stock_agent)
 
+    scheduler = AsyncIOScheduler()
+    pricing_agent = PricingAgent(AsyncSessionLocal, owner_bot, settings, scheduler)
+    pricing_agent.schedule()
+    scheduler.start()
+    register_pricing_callbacks(pricing_agent)
+
     yield
 
+    scheduler.shutdown(wait=False)
     owner_task.cancel()
     await owner_bot.session.close()
     if florist_task:

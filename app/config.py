@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     market_campaign_id: int
     market_client_id: str
     market_warehouse_id: int = 0
+    market_business_id: int = 187548892
     google_service_account_file: str = "/app/secrets/service_account.json"
     google_spreadsheet_id: str = ""
 
