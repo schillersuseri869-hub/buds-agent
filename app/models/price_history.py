@@ -1,5 +1,6 @@
 import uuid
 from decimal import Decimal
+from typing import Optional
 from datetime import datetime
 from sqlalchemy import Numeric, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,6 +19,7 @@ class PriceHistory(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     catalog_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    storefront_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    storefront_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
     min_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     optimal_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    promo_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)

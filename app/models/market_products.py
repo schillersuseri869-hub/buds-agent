@@ -1,6 +1,6 @@
 import uuid
 from decimal import Decimal
-from sqlalchemy import String, Numeric, Enum
+from sqlalchemy import String, Numeric, Enum, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base
 
@@ -15,6 +15,7 @@ class MarketProduct(Base):
     crossed_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     min_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     optimal_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    is_pr: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(
         Enum("active", "hidden", name="product_status"), nullable=False, default="active"
     )

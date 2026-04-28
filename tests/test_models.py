@@ -12,6 +12,7 @@ from app.models.stock_movements import StockMovement
 from app.models.print_jobs import PrintJob
 from app.models.price_history import PriceHistory
 from app.models.price_alerts import PriceAlert
+from app.models.promo_participations import PromoParticipation
 from app.models.economics_reports import EconomicsReport
 from app.models.shop_schedule import ShopSchedule
 from app.models.events_log import EventLog
@@ -129,3 +130,53 @@ async def test_recipe_links_product_and_material(db_session):
     db_session.add(recipe)
     await db_session.commit()
     assert recipe.id is not None
+
+
+@pytest.mark.asyncio
+async def test_market_product_has_is_pr(db_session):
+    prod = MarketProduct(
+        market_sku="TEST-PR-001",
+        name="Test PR SKU",
+        catalog_price=Decimal("1900"),
+        crossed_price=Decimal("2660"),
+        min_price=Decimal("1000"),
+        optimal_price=Decimal("1000"),
+        is_pr=True,
+    )
+    db_session.add(prod)
+    await db_session.commit()
+    await db_session.refresh(prod)
+    assert prod.is_pr is True
+
+
+@pytest.mark.asyncio
+async def test_price_history_has_promo_price(db_session):
+    ph = PriceHistory(
+        product_id=uuid.uuid4(),
+        catalog_price=Decimal("1500"),
+        storefront_price=Decimal("1200"),
+        min_price=Decimal("1000"),
+        optimal_price=Decimal("1000"),
+        promo_price=Decimal("1100"),
+    )
+    db_session.add(ph)
+    await db_session.commit()
+    await db_session.refresh(ph)
+    assert ph.promo_price == Decimal("1100")
+
+
+@pytest.mark.asyncio
+async def test_promo_participation_create(db_session):
+    from datetime import datetime, timezone
+    pp = PromoParticipation(
+        product_id=uuid.uuid4(),
+        promo_id="promo-abc-123",
+        promo_type="direct_discount",
+        promo_price=Decimal("1100"),
+        discount_pct=None,
+        updated_at=datetime.now(timezone.utc),
+    )
+    db_session.add(pp)
+    await db_session.commit()
+    await db_session.refresh(pp)
+    assert pp.promo_id == "promo-abc-123"
