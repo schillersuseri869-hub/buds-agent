@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   app:
     build: .
@@ -40,5 +38,18 @@ services:
       timeout: 5s
       retries: 5
 
+  grist:
+    image: gristlabs/grist
+    environment:
+      APP_HOME_URL: http://82.22.3.55:8484
+      GRIST_SESSION_SECRET: 50190045cb0973fb870e8a61bd06d4a23e8d11faf72d929f96f52cb61111370e
+      GRIST_SINGLE_ORG: buds
+    volumes:
+      - gristdata:/persist
+    ports:
+      - "8484:8484"
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  gristdata:
