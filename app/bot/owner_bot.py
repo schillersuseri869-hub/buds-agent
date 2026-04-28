@@ -24,6 +24,20 @@ def register_order_callbacks(order_agent) -> None:
         await order_agent.handle_button_callback(callback)
 
 
+def register_pricing_callbacks(pricing_agent) -> None:
+    @owner_router.callback_query(
+        lambda c: c.data and c.data.startswith(("price_quarantine_confirm:", "price_quarantine_skip:"))
+    )
+    async def handle_quarantine_callback(callback: CallbackQuery):
+        await callback.answer()
+        action, sku = callback.data.split(":", 1)
+        if action == "price_quarantine_confirm":
+            await pricing_agent.apply_quarantine_update(sku)
+            await callback.message.edit_text(f"✅ Цена для {sku} обновлена в Маркете.")
+        else:
+            await callback.message.edit_text(f"⏭ Обновление {sku} пропущено.")
+
+
 def register_stock_commands(flower_stock_agent) -> None:
     @owner_router.message()
     async def handle_stock_message(message: Message):
