@@ -83,6 +83,7 @@ async def load_products(
         name = row[1].strip()
         catalog_price, crossed_price = _d(row[2]), _d(row[3])
         min_price, optimal_price = _d(row[4]), _d(row[5])
+        is_pr = len(row) > 6 and str(row[6]).strip().lower() in ("pr", "true", "1", "да")
 
         result = await db.execute(
             select(MarketProduct).where(MarketProduct.market_sku == sku)
@@ -93,6 +94,7 @@ async def load_products(
                 market_sku=sku, name=name,
                 catalog_price=catalog_price, crossed_price=crossed_price,
                 min_price=min_price, optimal_price=optimal_price,
+                is_pr=is_pr,
             )
             db.add(prod)
         else:
@@ -101,10 +103,11 @@ async def load_products(
             prod.crossed_price = crossed_price
             prod.min_price = min_price
             prod.optimal_price = optimal_price
+            prod.is_pr = is_pr
         await db.commit()
         await db.refresh(prod)
         loaded[sku] = prod
-        logger.info("Loaded product: %s — %s", sku, name)
+        logger.info("Loaded product: %s — %s (is_pr=%s)", sku, name, is_pr)
     return loaded
 
 
@@ -156,7 +159,7 @@ async def load_from_sheets(
     service = _sheets_service(service_account_file)
 
     mat_rows = _get_range(service, spreadsheet_id, "Сырьё!A2:E")
-    prod_rows = _get_range(service, spreadsheet_id, "Товары!A2:F")
+    prod_rows = _get_range(service, spreadsheet_id, "Товары!A2:G")
     recipe_rows = _get_range(service, spreadsheet_id, "Рецепты!A2:C")
 
     materials = await load_materials(db, mat_rows)
