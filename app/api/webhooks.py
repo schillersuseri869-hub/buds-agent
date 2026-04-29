@@ -32,6 +32,7 @@ _PING_RESPONSE = {
 }
 
 
+@router.post("/market/notification")
 @router.post("/market")
 async def market_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     payload = await request.json()
