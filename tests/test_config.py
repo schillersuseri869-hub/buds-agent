@@ -18,8 +18,9 @@ def test_settings_loads_from_env():
         "MARKET_API_TOKEN": "mtoken",
         "MARKET_CAMPAIGN_ID": "12345",
         "MARKET_CLIENT_ID": "67890",
-        "GOOGLE_SERVICE_ACCOUNT_FILE": "/tmp/sa.json",
-        "GOOGLE_SPREADSHEET_ID": "sheet123",
+        "GRIST_URL": "http://localhost:8484",
+        "GRIST_DOC_ID": "testdocid",
+        "GRIST_API_KEY": "testapikey",
     }
     with patch.dict(os.environ, env, clear=True):
         from app.config import Settings

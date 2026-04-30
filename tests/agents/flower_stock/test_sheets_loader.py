@@ -6,7 +6,8 @@ from app.agents.flower_stock.sheets_loader import load_products
 @pytest.mark.asyncio
 async def test_load_products_sets_is_pr_true():
     rows = [
-        ["SKU-001", "Роза красная", "1500", "2100", "1000", "1000", "pr"],
+        {"market_sku": "SKU-001", "name": "Роза красная", "catalog_price": 1500,
+         "crossed_price": 2100, "min_price": 1000, "optimal_price": 1000, "is_pr": True},
     ]
     session = AsyncMock()
     session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
@@ -25,7 +26,8 @@ async def test_load_products_sets_is_pr_true():
 @pytest.mark.asyncio
 async def test_load_products_sets_is_pr_false_by_default():
     rows = [
-        ["SKU-002", "Тюльпан", "750", "1050", "500", "500", ""],
+        {"market_sku": "SKU-002", "name": "Тюльпан", "catalog_price": 750,
+         "crossed_price": 1050, "min_price": 500, "optimal_price": 500, "is_pr": False},
     ]
     session = AsyncMock()
     session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
