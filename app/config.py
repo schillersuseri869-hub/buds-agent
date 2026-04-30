@@ -20,8 +20,9 @@ class Settings(BaseSettings):
     market_client_id: str
     market_warehouse_id: int = 0
     market_business_id: int = 187548892
-    google_service_account_file: str = "/app/secrets/service_account.json"
-    google_spreadsheet_id: str = ""
+    grist_url: str = "http://grist:8484"
+    grist_doc_id: str = ""
+    grist_api_key: str = ""
 
     @field_validator("florist_telegram_id", "florist_bot_token", mode="before")
     @classmethod

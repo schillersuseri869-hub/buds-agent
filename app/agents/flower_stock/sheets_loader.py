@@ -1,8 +1,7 @@
 import logging
 from decimal import Decimal, InvalidOperation
 
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,58 +11,49 @@ from app.models.recipes import Recipe
 
 logger = logging.getLogger(__name__)
 
-_SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
-
-def _sheets_service(service_account_file: str):
-    creds = service_account.Credentials.from_service_account_file(
-        service_account_file, scopes=_SCOPES
-    )
-    return build("sheets", "v4", credentials=creds)
-
-
-def _get_range(service, spreadsheet_id: str, range_: str) -> list[list]:
-    result = (
-        service.spreadsheets()
-        .values()
-        .get(spreadsheetId=spreadsheet_id, range=range_)
-        .execute()
-    )
-    return result.get("values", [])
-
-
-def _d(value: str) -> Decimal:
+def _d(value) -> Decimal:
     try:
         return Decimal(str(value).replace(",", ".").strip())
     except InvalidOperation:
         return Decimal("0")
 
 
-async def load_materials(
-    db: AsyncSession, rows: list[list]
-) -> dict[str, RawMaterial]:
-    """Upsert raw_materials from sheet rows. Returns {name: RawMaterial}."""
+async def _fetch_table(base_url: str, doc_id: str, api_key: str, table: str) -> list[dict]:
+    url = f"{base_url}/api/docs/{doc_id}/tables/{table}/records"
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=30.0,
+        )
+        response.raise_for_status()
+    return [r["fields"] for r in response.json().get("records", [])]
+
+
+async def load_materials(db: AsyncSession, rows: list[dict]) -> dict[str, RawMaterial]:
     loaded: dict[str, RawMaterial] = {}
     for row in rows:
-        if len(row) < 5 or not row[0].strip():
+        name = str(row.get("name", "")).strip()
+        if not name:
             continue
-        name, type_, unit = row[0].strip(), row[1].strip(), row[2].strip()
-        initial_stock, cost = _d(row[3]), _d(row[4])
+        type_ = str(row.get("type", "")).strip()
+        unit = str(row.get("unit", "")).strip()
+        physical_stock = _d(row.get("physical_stock", 0))
+        cost_per_unit = _d(row.get("cost_per_unit", 0))
 
-        result = await db.execute(
-            select(RawMaterial).where(RawMaterial.name == name)
-        )
+        result = await db.execute(select(RawMaterial).where(RawMaterial.name == name))
         mat = result.scalar_one_or_none()
         if mat is None:
             mat = RawMaterial(
                 name=name, type=type_, unit=unit,
-                physical_stock=initial_stock, cost_per_unit=cost,
+                physical_stock=physical_stock, cost_per_unit=cost_per_unit,
             )
             db.add(mat)
         else:
             mat.type = type_
             mat.unit = unit
-            mat.cost_per_unit = cost
+            mat.cost_per_unit = cost_per_unit
         await db.commit()
         await db.refresh(mat)
         loaded[name] = mat
@@ -71,23 +61,20 @@ async def load_materials(
     return loaded
 
 
-async def load_products(
-    db: AsyncSession, rows: list[list]
-) -> dict[str, MarketProduct]:
-    """Upsert market_products from sheet rows. Returns {market_sku: MarketProduct}."""
+async def load_products(db: AsyncSession, rows: list[dict]) -> dict[str, MarketProduct]:
     loaded: dict[str, MarketProduct] = {}
     for row in rows:
-        if len(row) < 6 or not row[0].strip():
+        sku = str(row.get("market_sku", "")).strip()
+        if not sku:
             continue
-        sku = row[0].strip()
-        name = row[1].strip()
-        catalog_price, crossed_price = _d(row[2]), _d(row[3])
-        min_price, optimal_price = _d(row[4]), _d(row[5])
-        is_pr = len(row) > 6 and str(row[6]).strip().lower() in ("pr", "true", "1", "да")
+        name = str(row.get("name", "")).strip()
+        catalog_price = _d(row.get("catalog_price", 0))
+        crossed_price = _d(row.get("crossed_price", 0))
+        min_price = _d(row.get("min_price", 0))
+        optimal_price = _d(row.get("optimal_price", 0))
+        is_pr = bool(row.get("is_pr", False))
 
-        result = await db.execute(
-            select(MarketProduct).where(MarketProduct.market_sku == sku)
-        )
+        result = await db.execute(select(MarketProduct).where(MarketProduct.market_sku == sku))
         prod = result.scalar_one_or_none()
         if prod is None:
             prod = MarketProduct(
@@ -113,16 +100,17 @@ async def load_products(
 
 async def load_recipes(
     db: AsyncSession,
-    rows: list[list],
+    rows: list[dict],
     products: dict[str, MarketProduct],
     materials: dict[str, RawMaterial],
 ) -> int:
-    """Upsert recipes. Returns count of recipes loaded."""
     count = 0
     for row in rows:
-        if len(row) < 3 or not row[0].strip():
+        sku = str(row.get("market_sku", "")).strip()
+        mat_name = str(row.get("material_name", "")).strip()
+        qty = _d(row.get("quantity", 0))
+        if not sku or not mat_name:
             continue
-        sku, mat_name, qty = row[0].strip(), row[1].strip(), _d(row[2])
 
         prod = products.get(sku)
         mat = materials.get(mat_name)
@@ -134,10 +122,7 @@ async def load_recipes(
             continue
 
         result = await db.execute(
-            select(Recipe).where(
-                Recipe.product_id == prod.id,
-                Recipe.material_id == mat.id,
-            )
+            select(Recipe).where(Recipe.product_id == prod.id, Recipe.material_id == mat.id)
         )
         recipe = result.scalar_one_or_none()
         if recipe is None:
@@ -150,22 +135,20 @@ async def load_recipes(
     return count
 
 
-async def load_from_sheets(
+async def load_from_grist(
     db: AsyncSession,
-    service_account_file: str,
-    spreadsheet_id: str,
+    base_url: str,
+    doc_id: str,
+    api_key: str,
 ) -> None:
-    """Load all data from Google Sheets into DB (upsert)."""
-    service = _sheets_service(service_account_file)
-
-    mat_rows = _get_range(service, spreadsheet_id, "Сырьё!A2:E")
-    prod_rows = _get_range(service, spreadsheet_id, "Товары!A2:G")
-    recipe_rows = _get_range(service, spreadsheet_id, "Рецепты!A2:C")
+    mat_rows = await _fetch_table(base_url, doc_id, api_key, "Materials")
+    prod_rows = await _fetch_table(base_url, doc_id, api_key, "Products")
+    recipe_rows = await _fetch_table(base_url, doc_id, api_key, "Recipes")
 
     materials = await load_materials(db, mat_rows)
     products = await load_products(db, prod_rows)
     await load_recipes(db, recipe_rows, products, materials)
     logger.info(
-        "Sheets load complete: %d materials, %d products",
+        "Grist load complete: %d materials, %d products",
         len(materials), len(products),
     )
