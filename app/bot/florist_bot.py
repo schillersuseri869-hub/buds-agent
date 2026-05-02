@@ -19,6 +19,18 @@ def register_order_callbacks(order_agent) -> None:
         await order_agent.handle_button_callback(callback)
 
 
+def register_eucalyptus_callbacks(flower_stock_agent) -> None:
+    @florist_router.callback_query(
+        lambda c: c.data and c.data.startswith("evk_restock:")
+    )
+    async def handle_evk_callback(callback: CallbackQuery):
+        await callback.answer()
+        qty_g = int(callback.data.split(":", 1)[1])
+        await flower_stock_agent.handle_eucalyptus_callback(qty_g)
+        label = f"{qty_g}г добавлено" if qty_g else "Не добавлять"
+        await callback.message.edit_text(f"✅ {label}")
+
+
 def create_florist_bot() -> tuple[Bot, Dispatcher] | None:
     if not settings.florist_bot_token:
         return None
