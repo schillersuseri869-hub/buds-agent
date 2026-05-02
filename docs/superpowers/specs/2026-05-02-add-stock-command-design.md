@@ -133,6 +133,40 @@ New Alembic migration.
 - Prompt for vision extraction returns structured JSON; parsed with `json.loads`
 - Prompt for alias matching: "Given these materials: [...]. Which best matches '{alias}'? Reply with just the material name or 'unknown'."
 
+### 7. Inventory audit `/inventory` — `app/bot/inventory_fsm.py`
+
+FSM goes through each material one by one:
+- `AuditMaterial` — shows "Роза 40см: в системе 47 шт. Сколько по факту?" → user types number
+- On each answer: calls `stock_ops.record_inventory_correction(db, material_id, actual_qty)` which sets `physical_stock = actual_qty` and logs a `StockMovement(type="inventory_correction", quantity=delta)`
+- Skips materials with active reservations (warns: "У «Роза» есть резерв, пропускаю")
+- At end: summary "Инвентаризация завершена. Исправлено N позиций." with deltas
+
+`/cancel` stops audit mid-way; already-confirmed materials are saved. Registered on `owner_router` only (not florist).
+
+### 8. Movement history `/history` — inline query in `owner_bot.py` and `florist_bot.py`
+
+No FSM. Flow:
+1. `/history` → inline keyboard of all materials
+2. User taps material → bot shows last 20 `StockMovement` rows for that material, newest first
+3. Format per row: `"01.05 14:30 · Приход +50 шт. по 80₽"` / `"01.05 09:15 · Списание -3 шт. (порча)"`
+
+`stock_ops.get_material_history(db, material_id, limit=20) -> list[StockMovement]` — new helper.
+
+### 9. Cost report `/report` — inline query in `owner_bot.py` only
+
+No FSM. Flow:
+1. `/report` → inline keyboard: `[За сегодня]` `[За неделю]` `[За месяц]`
+2. Bot replies with:
+   ```
+   📊 Отчёт за неделю (25.04–01.05)
+   
+   Закупки: 12 500₽ (8 позиций)
+   Списания: 1 200₽
+   Стоимость склада: 34 800₽
+   ```
+
+`stock_ops.get_report(db, since: datetime) -> ReportData` — new helper that aggregates `StockMovement` rows. `ReportData` is a dataclass with `arrivals_cost`, `write_offs_cost`, `current_stock_value`.
+
 ## Error Handling
 
 - If vision extraction fails → bot replies "Не удалось распознать фото. Попробуй ещё раз или используй /add."
@@ -146,4 +180,6 @@ New Alembic migration.
 - Unit tests for `synonym_ops`: lookup hit/miss, save+lookup roundtrip
 - Unit tests for `/add` FSM: mock DB, step through states, verify `record_arrival` called with correct args
 - Unit tests for `/write_off` FSM: all three types; verify correct `stock_ops` method called per type; verify "К заказу" triggers order list step
+- Unit tests for `/inventory` FSM: correction recorded correctly, delta calculated, reserved materials skipped
+- Unit tests for `get_material_history` and `get_report` helpers: correct filtering by date and material
 - Unit tests for confirmation loop: alias found → direct confirm; alias missing → AI propose → confirm → save
