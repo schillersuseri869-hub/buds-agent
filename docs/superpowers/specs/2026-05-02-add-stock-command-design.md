@@ -2,16 +2,18 @@
 
 ## Goal
 
-Allow owner and florist to record stock arrivals via Telegram — either manually through a guided FSM flow (`/add`), or automatically by sending a supplier invoice photo or `.xlsx` file.
+Allow owner and florist to record stock arrivals and write-offs via Telegram — either manually through guided FSM flows (`/add`, `/write_off`), or automatically by sending a supplier invoice photo or `.xlsx` file.
 
 ## Architecture
 
-Two parallel entry points that converge at the same `record_arrival` operation:
+Three entry points converging on stock operations:
 
 ```
 /add → FSM (SelectMaterial → EnterQuantity → EnterPrice) → record_arrival
 photo/screenshot → Claude Haiku vision → item list ┐
 .xlsx file → openpyxl parser → item list           ┘→ synonym lookup → per-item confirm → record_arrival
+
+/write_off → FSM (SelectType → SelectMaterial → EnterQuantity → [SelectOrder]) → record_write_off
 ```
 
 A new `supplier_aliases` table maps supplier-specific names (e.g. "АЛТАЙ", "БАЛТИКА") to internal material IDs. On first encounter the AI proposes a match, the user confirms, and the mapping is saved. Subsequent invoices with the same name resolve instantly without AI.
@@ -82,6 +84,33 @@ For each `InvoiceItem`:
 
 State between items is stored in FSMContext (item queue + current index).
 
+### 6. FSM: Write-off `/write_off` — `app/bot/write_off_fsm.py`
+
+States:
+- `SelectType` — bot shows: `[Брак]` `[Порча]` `[К заказу]`
+- `SelectMaterial` — inline keyboard of all materials
+- `EnterQuantity` — bot asks "Сколько?"; user types a number
+- `SelectOrder` *(only for "К заказу")* — bot shows last 20 orders as inline keyboard, format: `"MKT-123 · Роза + Хризантема"`
+
+On completion:
+- Брак → `stock_ops.record_spoilage(db, material_id, qty, movement_type="defect")`
+- Порча → `stock_ops.record_spoilage(db, material_id, qty, movement_type="spoilage")`
+- К заказу → `stock_ops.record_extra_debit(db, material_id, order_id, qty)`
+
+Confirmation message:
+```
+✅ Списано: 3 шт. «Хризантема белая» (брак)
+Остаток: 47 шт.
+```
+or for order-linked:
+```
+✅ Доп. списание: 2 шт. «Хризантема белая» к заказу MKT-123
+```
+
+`/cancel` resets FSM at any state. Registered on both `owner_router` and `florist_router`.
+
+`stock_ops.get_recent_orders(db, limit=20) -> list[Order]` — new helper, orders by `created_at DESC`.
+
 ## Data Model
 
 New table `supplier_aliases`:
@@ -115,5 +144,6 @@ New Alembic migration.
 
 - Unit tests for `invoice_reader`: mock Anthropic client, test JSON parsing; test xlsx parsing with in-memory workbook
 - Unit tests for `synonym_ops`: lookup hit/miss, save+lookup roundtrip
-- Unit tests for FSM: mock DB, step through states, verify `record_arrival` called with correct args
+- Unit tests for `/add` FSM: mock DB, step through states, verify `record_arrival` called with correct args
+- Unit tests for `/write_off` FSM: all three types; verify correct `stock_ops` method called per type; verify "К заказу" triggers order list step
 - Unit tests for confirmation loop: alias found → direct confirm; alias missing → AI propose → confirm → save
