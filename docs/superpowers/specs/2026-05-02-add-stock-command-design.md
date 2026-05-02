@@ -1,0 +1,119 @@
+# Add Stock Command Design
+
+## Goal
+
+Allow owner and florist to record stock arrivals via Telegram — either manually through a guided FSM flow (`/add`), or automatically by sending a supplier invoice photo or `.xlsx` file.
+
+## Architecture
+
+Two parallel entry points that converge at the same `record_arrival` operation:
+
+```
+/add → FSM (SelectMaterial → EnterQuantity → EnterPrice) → record_arrival
+photo/screenshot → Claude Haiku vision → item list ┐
+.xlsx file → openpyxl parser → item list           ┘→ synonym lookup → per-item confirm → record_arrival
+```
+
+A new `supplier_aliases` table maps supplier-specific names (e.g. "АЛТАЙ", "БАЛТИКА") to internal material IDs. On first encounter the AI proposes a match, the user confirms, and the mapping is saved. Subsequent invoices with the same name resolve instantly without AI.
+
+## Components
+
+### 1. FSM: Manual `/add` — `app/bot/add_stock_fsm.py`
+
+States:
+- `SelectMaterial` — bot shows inline keyboard of all materials from DB; user taps one
+- `EnterQuantity` — bot asks "Сколько?"; user types a number
+- `EnterPrice` — bot asks "Цена за единицу (₽)?"; user types a number
+
+On completion: calls `stock_ops.record_arrival`, bot replies with confirmation:
+```
+✅ Приход: 50 шт. «Роза 40см» по 80₽
+Остаток на складе: 350 шт.
+```
+
+`/cancel` at any state resets FSM and replies "Отменено."
+
+Registered on both `owner_router` and `florist_router`.
+
+### 2. Invoice handler — `app/bot/scan_invoice.py`
+
+Handles two Telegram message types:
+- `Message.photo` — downloads highest-res photo
+- `Message.document` with `.xlsx` mime type — downloads file
+
+After extracting raw bytes, delegates to `invoice_reader`. Then runs the per-item confirmation loop (see below).
+
+### 3. Invoice reader — `app/agents/flower_stock/invoice_reader.py`
+
+Two functions:
+
+**`read_photo(image_bytes: bytes, material_names: list[str]) -> list[InvoiceItem]`**
+Sends image to Claude Haiku (`claude-haiku-4-5-20251001`) with a prompt that includes the list of known material names and asks it to extract `[{name, qty, price}]` as JSON. Returns parsed list.
+
+**`read_xlsx(file_bytes: bytes) -> list[InvoiceItem]`**
+Opens with `openpyxl`, scans all rows looking for columns that look like (name, qty, price) — tries header-based detection first, falls back to column position heuristic. Returns list of `InvoiceItem(name, qty, price)`.
+
+`InvoiceItem` is a simple dataclass: `name: str, qty: Decimal, price: Decimal`.
+
+### 4. Synonym ops — `app/agents/flower_stock/synonym_ops.py`
+
+**`lookup_alias(db, alias_text: str) -> RawMaterial | None`**
+Searches `supplier_aliases` by lowercased alias_text. Returns matched material or None.
+
+**`save_alias(db, alias_text: str, material_id: uuid.UUID) -> None`**
+Inserts row into `supplier_aliases`. Ignores conflict (upsert).
+
+### 5. Per-item confirmation loop — inside `scan_invoice.py`
+
+For each `InvoiceItem`:
+1. Look up alias → if found, skip to confirmation with matched material
+2. If not found → call AI to propose best match from material list → show proposal
+3. Show message:
+   ```
+   📦 АЛТАЙ × 50 шт. по 85₽
+   → Похоже на «Хризантема белая»?
+
+   [✅ Да]  [⏭ Пропустить]
+   ```
+4. User can also **type a material name** instead of pressing a button — bot looks it up in DB
+5. On "✅ Да" or text confirmation: save alias + call `record_arrival`
+6. On "⏭ Пропустить": skip item, continue to next
+7. After all items: summary "Записано N из M позиций."
+
+State between items is stored in FSMContext (item queue + current index).
+
+## Data Model
+
+New table `supplier_aliases`:
+```sql
+CREATE TABLE supplier_aliases (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    alias_text VARCHAR NOT NULL UNIQUE,  -- lowercase, stripped
+    material_id UUID NOT NULL REFERENCES raw_materials(id) ON DELETE CASCADE
+);
+CREATE INDEX ON supplier_aliases (alias_text);
+```
+
+New Alembic migration.
+
+## AI Usage
+
+- Model: `claude-haiku-4-5-20251001`
+- Used for: (a) vision extraction from photos/screenshots, (b) proposing alias match when alias not in DB
+- Not used for: xlsx parsing, confirmed aliases (resolved from DB)
+- Prompt for vision extraction returns structured JSON; parsed with `json.loads`
+- Prompt for alias matching: "Given these materials: [...]. Which best matches '{alias}'? Reply with just the material name or 'unknown'."
+
+## Error Handling
+
+- If vision extraction fails → bot replies "Не удалось распознать фото. Попробуй ещё раз или используй /add."
+- If xlsx has no recognizable columns → same fallback message
+- If AI returns 'unknown' for alias match → skip item, notify "Не удалось сопоставить: АЛТАЙ"
+- All errors logged, owner gets alert via `_alert()`
+
+## Testing
+
+- Unit tests for `invoice_reader`: mock Anthropic client, test JSON parsing; test xlsx parsing with in-memory workbook
+- Unit tests for `synonym_ops`: lookup hit/miss, save+lookup roundtrip
+- Unit tests for FSM: mock DB, step through states, verify `record_arrival` called with correct args
+- Unit tests for confirmation loop: alias found → direct confirm; alias missing → AI propose → confirm → save
