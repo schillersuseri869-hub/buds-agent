@@ -48,6 +48,18 @@ def register_stock_commands(flower_stock_agent) -> None:
             await message.answer(response)
 
 
+def register_eucalyptus_callbacks(flower_stock_agent) -> None:
+    @owner_router.callback_query(
+        lambda c: c.data and c.data.startswith("evk_restock:")
+    )
+    async def handle_evk_callback(callback: CallbackQuery):
+        await callback.answer()
+        qty_g = int(callback.data.split(":", 1)[1])
+        await flower_stock_agent.handle_eucalyptus_callback(qty_g)
+        label = f"{qty_g}г добавлено" if qty_g else "Не добавлять"
+        await callback.message.edit_text(f"✅ {label}")
+
+
 def create_owner_bot() -> tuple[Bot, Dispatcher]:
     bot = Bot(token=settings.owner_bot_token)
     dp = Dispatcher()
