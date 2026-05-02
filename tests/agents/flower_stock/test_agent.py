@@ -265,6 +265,8 @@ async def test_alert_all_skips_florist_when_telegram_id_missing():
 async def test_handle_order_created_sends_alert_when_eucalyptus_low():
     owner_bot = AsyncMock()
     owner_bot.send_message = AsyncMock()
+    florist_bot = AsyncMock()
+    florist_bot.send_message = AsyncMock()
     fake_items = [{"sku": "bouquet-e-red", "count": 1, "price": 500}]
 
     with patch("app.agents.flower_stock.agent.market_api") as mock_mapi, \
@@ -276,14 +278,19 @@ async def test_handle_order_created_sends_alert_when_eucalyptus_low():
         mock_ops.is_eucalyptus_low = AsyncMock(return_value=True)
         mock_mapi.update_stocks = AsyncMock()
 
-        agent = _make_agent(owner_bot=owner_bot)
+        agent = _make_agent(owner_bot=owner_bot, florist_bot=florist_bot)
         await agent.handle_order_created("order.created", {
             "order_id": str(uuid.uuid4()),
             "market_order_id": "MKT-E-001",
         })
 
-    sent_texts = [str(call) for call in owner_bot.send_message.call_args_list]
-    assert any("Эвкалипт" in t for t in sent_texts)
+    # owner gets plain text alert (no keyboard)
+    owner_texts = [str(call) for call in owner_bot.send_message.call_args_list]
+    assert any("Эвкалипт" in t for t in owner_texts)
+    # florist gets the keyboard
+    florist_bot.send_message.assert_awaited_once()
+    florist_call_kwargs = florist_bot.send_message.call_args
+    assert "reply_markup" in florist_call_kwargs.kwargs
 
 
 @pytest.mark.asyncio

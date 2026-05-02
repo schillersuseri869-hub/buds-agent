@@ -140,10 +140,16 @@ class FlowerStockAgent:
             async with self._db_factory() as db:
                 low = await stock_ops.is_eucalyptus_low(db)
             if low:
-                await self._alert_all(
-                    "⚠️ Эвкалипт заканчивается. Сколько осталось в холодильнике?",
-                    reply_markup=_EVKALIPT_KEYBOARD,
-                )
+                await self._alert("⚠️ Эвкалипт заканчивается.")
+                if self._florist_bot and self._settings.florist_telegram_id:
+                    try:
+                        await self._florist_bot.send_message(
+                            self._settings.florist_telegram_id,
+                            "⚠️ Эвкалипт заканчивается. Сколько осталось в холодильнике?",
+                            reply_markup=_EVKALIPT_KEYBOARD,
+                        )
+                    except Exception as exc:
+                        logger.error("Failed to send eucalyptus alert to florist: %s", exc)
 
     async def handle_order_ready(self, channel: str, data: dict) -> None:
         order_id_str = data.get("order_id")
