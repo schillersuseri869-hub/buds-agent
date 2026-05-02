@@ -27,11 +27,16 @@ from app.agents.order_agent.agent import OrderAgent
 from app.agents.flower_stock.agent import FlowerStockAgent
 from app.agents.pricing_agent.agent import PricingAgent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from aiogram.types import BotCommand
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     owner_bot, owner_dp = create_owner_bot()
+    await owner_bot.set_my_commands([
+        BotCommand(command="stock", description="Остатки склада"),
+        BotCommand(command="status", description="Статус бота"),
+    ])
     owner_task = asyncio.create_task(owner_dp.start_polling(owner_bot))
 
     florist_result = create_florist_bot()
