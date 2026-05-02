@@ -266,3 +266,34 @@ async def compute_available_stocks(db: AsyncSession) -> dict[str, int]:
         stocks[product.market_sku] = min(counts) if counts else 0
 
     return stocks
+
+
+async def is_eucalyptus_low(db: AsyncSession) -> bool:
+    """True if net eucalyptus (physical_stock - reserved) is below 200g."""
+    result = await db.execute(
+        select(RawMaterial).where(RawMaterial.name == "evkalipt")
+    )
+    mat = result.scalar_one_or_none()
+    if mat is None:
+        return False
+    return (mat.physical_stock - mat.reserved) < Decimal("200")
+
+
+async def set_eucalyptus_stock(db: AsyncSession, quantity: Decimal) -> RawMaterial:
+    """Set eucalyptus physical_stock to an absolute value (florist's count).
+    Logs a StockMovement type='arrival' with the reported total (manual correction)."""
+    result = await db.execute(
+        select(RawMaterial).where(RawMaterial.name == "evkalipt").with_for_update()
+    )
+    mat = result.scalar_one()
+    mat.physical_stock = quantity
+    db.add(StockMovement(
+        material_id=mat.id,
+        order_id=None,
+        type="arrival",
+        quantity=quantity,
+        cost=quantity * mat.cost_per_unit,
+    ))
+    await db.commit()
+    await db.refresh(mat)
+    return mat

@@ -19,6 +19,8 @@ from app.agents.flower_stock.stock_ops import (
     find_material_by_name,
     compute_available_stocks,
     save_order_items,
+    is_eucalyptus_low,
+    set_eucalyptus_stock,
 )
 
 
@@ -325,3 +327,78 @@ async def test_save_order_items_stores_correct_data(db_session):
     assert items[0].product_id == prod.id
     assert items[0].quantity == 3
     assert items[0].unit_price == Decimal("500")
+
+
+# ─── is_eucalyptus_low ──────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_is_eucalyptus_low_returns_false_when_not_found(db_session):
+    # No "evkalipt" row in DB at all
+    result = await is_eucalyptus_low(db_session)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_is_eucalyptus_low_returns_false_when_sufficient(db_session):
+    await _mat(db_session, name="evkalipt", type_="flower", unit="г",
+               physical=Decimal("500"), reserved=Decimal("100"), cost=Decimal("1"))
+    # 500 - 100 = 400 >= 200 → not low
+    result = await is_eucalyptus_low(db_session)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_is_eucalyptus_low_returns_true_below_200(db_session):
+    await _mat(db_session, name="evkalipt", type_="flower", unit="г",
+               physical=Decimal("300"), reserved=Decimal("150"), cost=Decimal("1"))
+    # 300 - 150 = 150 < 200 → low
+    result = await is_eucalyptus_low(db_session)
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_is_eucalyptus_low_returns_true_at_zero(db_session):
+    await _mat(db_session, name="evkalipt", type_="flower", unit="г",
+               physical=Decimal("0"), reserved=Decimal("0"), cost=Decimal("1"))
+    result = await is_eucalyptus_low(db_session)
+    assert result is True
+
+
+# ─── set_eucalyptus_stock ───────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_set_eucalyptus_stock_sets_absolute_value(db_session):
+    await _mat(db_session, name="evkalipt", type_="flower", unit="г",
+               physical=Decimal("0"), cost=Decimal("5"))
+
+    updated = await set_eucalyptus_stock(db_session, Decimal("400"))
+
+    assert updated.physical_stock == Decimal("400")
+
+
+@pytest.mark.asyncio
+async def test_set_eucalyptus_stock_overwrites_previous_value(db_session):
+    await _mat(db_session, name="evkalipt", type_="flower", unit="г",
+               physical=Decimal("600"), cost=Decimal("5"))
+
+    updated = await set_eucalyptus_stock(db_session, Decimal("200"))
+
+    assert updated.physical_stock == Decimal("200")
+
+
+@pytest.mark.asyncio
+async def test_set_eucalyptus_stock_creates_arrival_movement(db_session):
+    mat = await _mat(db_session, name="evkalipt", type_="flower", unit="г",
+                     physical=Decimal("0"), cost=Decimal("5"))
+
+    await set_eucalyptus_stock(db_session, Decimal("400"))
+
+    result = await db_session.execute(
+        select(StockMovement).where(
+            StockMovement.material_id == mat.id,
+            StockMovement.type == "arrival",
+        )
+    )
+    movements = list(result.scalars().all())
+    assert len(movements) == 1
+    assert movements[0].quantity == Decimal("400")
