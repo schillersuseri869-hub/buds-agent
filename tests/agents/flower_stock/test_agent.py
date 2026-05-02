@@ -233,6 +233,32 @@ async def test_handle_eucalyptus_callback_alerts_both_bots():
     florist_bot.send_message.assert_awaited()
 
 
+@pytest.mark.asyncio
+async def test_alert_all_skips_florist_when_telegram_id_missing():
+    owner_bot = AsyncMock()
+    owner_bot.send_message = AsyncMock()
+    florist_bot = AsyncMock()
+    florist_bot.send_message = AsyncMock()
+    settings = MagicMock()
+    settings.owner_telegram_id = 111111
+    settings.florist_telegram_id = None  # not configured
+    settings.market_campaign_id = 1
+    settings.market_api_token = "t"
+    settings.market_warehouse_id = 0
+    agent = _make_agent(owner_bot=owner_bot, settings=settings, florist_bot=florist_bot)
+
+    with patch("app.agents.flower_stock.agent.stock_ops") as mock_ops, \
+         patch("app.agents.flower_stock.agent.market_api") as mock_mapi:
+        mock_ops.set_eucalyptus_stock = AsyncMock()
+        mock_ops.compute_available_stocks = AsyncMock(return_value={})
+        mock_mapi.update_stocks = AsyncMock()
+
+        await agent.handle_eucalyptus_callback(200)
+
+    owner_bot.send_message.assert_awaited()
+    florist_bot.send_message.assert_not_awaited()
+
+
 # ─── eucalyptus check in handle_order_created ───────────────────────────────
 
 @pytest.mark.asyncio

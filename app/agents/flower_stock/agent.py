@@ -93,12 +93,16 @@ class FlowerStockAgent:
         """Handle florist/owner restock button tap. qty_g=0 means 'do not restock'."""
         if qty_g == 0:
             return
-        async with self._db_factory() as db:
-            await stock_ops.set_eucalyptus_stock(db, Decimal(qty_g))
-        await self._update_storefront()
-        await self._alert_all(
-            f"✅ Эвкалипт: {qty_g}г. Позиции с эвкалиптом возвращены на витрину."
-        )
+        try:
+            async with self._db_factory() as db:
+                await stock_ops.set_eucalyptus_stock(db, Decimal(qty_g))
+            await self._update_storefront()
+            await self._alert_all(
+                f"✅ Эвкалипт: {qty_g}г. Позиции с эвкалиптом возвращены на витрину."
+            )
+        except Exception as exc:
+            logger.error("handle_eucalyptus_callback failed: %s", exc)
+            await self._alert(f"Ошибка при обновлении эвкалипта: {exc}")
 
     async def handle_order_created(self, channel: str, data: dict) -> None:
         order_id_str = data.get("order_id")
