@@ -40,6 +40,10 @@ def _to_decimal(s: str) -> Decimal:
     return Decimal(s.replace(",", "."))
 
 
+def _fmt(d: Decimal) -> str:
+    return format(d.normalize(), "f")
+
+
 class FlowerStockAgent:
     def __init__(
         self,
@@ -238,8 +242,8 @@ class FlowerStockAgent:
                 )
             await self._update_storefront()
             return (
-                f"✅ Приход: {parsed['quantity']} {mat.unit} «{mat.name}» "
-                f"по {parsed['cost_per_unit']}₽. Остаток: {mat.physical_stock} {mat.unit}."
+                f"✅ Приход: {_fmt(parsed['quantity'])} {mat.unit} «{mat.name}» "
+                f"по {_fmt(parsed['cost_per_unit'])}₽. Остаток: {_fmt(mat.physical_stock)} {mat.unit}."
             )
 
         if cmd_type == "spoilage":
@@ -247,8 +251,8 @@ class FlowerStockAgent:
                 mat = await stock_ops.record_spoilage(db, material.id, parsed["quantity"])
             await self._update_storefront()
             return (
-                f"✅ Списано: {parsed['quantity']} {mat.unit} «{mat.name}». "
-                f"Остаток: {mat.physical_stock} {mat.unit}."
+                f"✅ Списано: {_fmt(parsed['quantity'])} {mat.unit} «{mat.name}». "
+                f"Остаток: {_fmt(mat.physical_stock)} {mat.unit}."
             )
 
         if cmd_type == "extra_debit":
@@ -269,7 +273,7 @@ class FlowerStockAgent:
                 )
             await self._update_storefront()
             return (
-                f"✅ Доп. списание: {parsed['quantity']} {mat.unit} «{mat.name}» "
+                f"✅ Доп. списание: {_fmt(parsed['quantity'])} {mat.unit} «{mat.name}» "
                 f"к заказу #{order_ref}."
             )
 
