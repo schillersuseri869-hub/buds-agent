@@ -4,6 +4,7 @@ import uuid
 from decimal import Decimal
 
 from aiogram import Bot
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -25,6 +26,15 @@ _SPOILAGE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_EVKALIPT_KEYBOARD = InlineKeyboardMarkup(inline_keyboard=[
+    [
+        InlineKeyboardButton(text="200г", callback_data="evk_restock:200"),
+        InlineKeyboardButton(text="400г", callback_data="evk_restock:400"),
+        InlineKeyboardButton(text="600г", callback_data="evk_restock:600"),
+    ],
+    [InlineKeyboardButton(text="Не добавлять", callback_data="evk_restock:0")],
+])
+
 
 def _to_decimal(s: str) -> Decimal:
     return Decimal(s.replace(",", "."))
@@ -36,16 +46,34 @@ class FlowerStockAgent:
         db_factory: async_sessionmaker,
         owner_bot: Bot,
         settings,
+        florist_bot: Bot | None = None,
     ):
         self._db_factory = db_factory
         self._owner_bot = owner_bot
         self._settings = settings
+        self._florist_bot = florist_bot
 
     async def _alert(self, message: str) -> None:
         try:
             await self._owner_bot.send_message(self._settings.owner_telegram_id, message)
         except Exception as exc:
             logger.error("Failed to send alert: %s", exc)
+
+    async def _alert_all(self, message: str, reply_markup=None) -> None:
+        """Send message to owner and florist (if configured)."""
+        try:
+            await self._owner_bot.send_message(
+                self._settings.owner_telegram_id, message, reply_markup=reply_markup
+            )
+        except Exception as exc:
+            logger.error("Failed to send owner alert: %s", exc)
+        if self._florist_bot and self._settings.florist_telegram_id:
+            try:
+                await self._florist_bot.send_message(
+                    self._settings.florist_telegram_id, message, reply_markup=reply_markup
+                )
+            except Exception as exc:
+                logger.error("Failed to send florist alert: %s", exc)
 
     async def _update_storefront(self) -> None:
         try:
@@ -60,6 +88,17 @@ class FlowerStockAgent:
         except Exception as exc:
             logger.error("_update_storefront failed: %s", exc)
             await self._alert(f"Ошибка обновления витрины Маркета: {exc}")
+
+    async def handle_eucalyptus_callback(self, qty_g: int) -> None:
+        """Handle florist/owner restock button tap. qty_g=0 means 'do not restock'."""
+        if qty_g == 0:
+            return
+        async with self._db_factory() as db:
+            await stock_ops.set_eucalyptus_stock(db, Decimal(qty_g))
+        await self._update_storefront()
+        await self._alert_all(
+            f"✅ Эвкалипт: {qty_g}г. Позиции с эвкалиптом возвращены на витрину."
+        )
 
     async def handle_order_created(self, channel: str, data: dict) -> None:
         order_id_str = data.get("order_id")
@@ -91,6 +130,16 @@ class FlowerStockAgent:
             await stock_ops.reserve_materials(db, order_uuid, items)
 
         await self._update_storefront()
+
+        has_e_items = any("-e" in item.get("sku", "") for item in items)
+        if has_e_items:
+            async with self._db_factory() as db:
+                low = await stock_ops.is_eucalyptus_low(db)
+            if low:
+                await self._alert_all(
+                    "⚠️ Эвкалипт заканчивается. Сколько осталось в холодильнике?",
+                    reply_markup=_EVKALIPT_KEYBOARD,
+                )
 
     async def handle_order_ready(self, channel: str, data: dict) -> None:
         order_id_str = data.get("order_id")

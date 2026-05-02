@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.agents.flower_stock.agent import FlowerStockAgent
 
 
-def _make_agent(db_factory=None, owner_bot=None, settings=None):
+def _make_agent(db_factory=None, owner_bot=None, settings=None, florist_bot=None):
     if db_factory is None:
         session_mock = AsyncMock()
         session_mock.__aenter__ = AsyncMock(return_value=session_mock)
@@ -18,10 +18,11 @@ def _make_agent(db_factory=None, owner_bot=None, settings=None):
     if settings is None:
         settings = MagicMock()
         settings.owner_telegram_id = 111111
+        settings.florist_telegram_id = 222222
         settings.market_campaign_id = 148807227
         settings.market_api_token = "test_token"
         settings.market_warehouse_id = 99
-    return FlowerStockAgent(db_factory, owner_bot, settings)
+    return FlowerStockAgent(db_factory, owner_bot, settings, florist_bot=florist_bot)
 
 
 # ─── handle_order_created ───────────────────────────────────────────────────
@@ -174,3 +175,135 @@ def test_parse_unrecognized_returns_none():
     assert agent._parse_command("открой магазин") is None
     assert agent._parse_command("статус") is None
     assert agent._parse_command("") is None
+
+
+# ─── handle_eucalyptus_callback ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_handle_eucalyptus_callback_zero_does_nothing():
+    agent = _make_agent()
+    with patch("app.agents.flower_stock.agent.stock_ops") as mock_ops:
+        mock_ops.set_eucalyptus_stock = AsyncMock()
+        await agent.handle_eucalyptus_callback(0)
+    mock_ops.set_eucalyptus_stock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handle_eucalyptus_callback_sets_stock_and_restores_storefront():
+    owner_bot = AsyncMock()
+    owner_bot.send_message = AsyncMock()
+    agent = _make_agent(owner_bot=owner_bot)
+
+    with patch("app.agents.flower_stock.agent.stock_ops") as mock_ops, \
+         patch("app.agents.flower_stock.agent.market_api") as mock_mapi:
+        mock_ops.set_eucalyptus_stock = AsyncMock()
+        mock_ops.compute_available_stocks = AsyncMock(return_value={"SKU-e": 3})
+        mock_mapi.update_stocks = AsyncMock()
+
+        await agent.handle_eucalyptus_callback(400)
+
+    mock_ops.set_eucalyptus_stock.assert_awaited_once()
+    mock_mapi.update_stocks.assert_awaited_once()
+    owner_bot.send_message.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_handle_eucalyptus_callback_alerts_both_bots():
+    owner_bot = AsyncMock()
+    owner_bot.send_message = AsyncMock()
+    florist_bot = AsyncMock()
+    florist_bot.send_message = AsyncMock()
+    settings = MagicMock()
+    settings.owner_telegram_id = 111111
+    settings.florist_telegram_id = 222222
+    settings.market_campaign_id = 1
+    settings.market_api_token = "t"
+    settings.market_warehouse_id = 0
+    agent = _make_agent(owner_bot=owner_bot, settings=settings, florist_bot=florist_bot)
+
+    with patch("app.agents.flower_stock.agent.stock_ops") as mock_ops, \
+         patch("app.agents.flower_stock.agent.market_api") as mock_mapi:
+        mock_ops.set_eucalyptus_stock = AsyncMock()
+        mock_ops.compute_available_stocks = AsyncMock(return_value={})
+        mock_mapi.update_stocks = AsyncMock()
+
+        await agent.handle_eucalyptus_callback(200)
+
+    owner_bot.send_message.assert_awaited()
+    florist_bot.send_message.assert_awaited()
+
+
+# ─── eucalyptus check in handle_order_created ───────────────────────────────
+
+@pytest.mark.asyncio
+async def test_handle_order_created_sends_alert_when_eucalyptus_low():
+    owner_bot = AsyncMock()
+    owner_bot.send_message = AsyncMock()
+    fake_items = [{"sku": "bouquet-e-red", "count": 1, "price": 500}]
+
+    with patch("app.agents.flower_stock.agent.market_api") as mock_mapi, \
+         patch("app.agents.flower_stock.agent.stock_ops") as mock_ops:
+        mock_mapi.get_order_items = AsyncMock(return_value=fake_items)
+        mock_ops.save_order_items = AsyncMock()
+        mock_ops.reserve_materials = AsyncMock()
+        mock_ops.compute_available_stocks = AsyncMock(return_value={})
+        mock_ops.is_eucalyptus_low = AsyncMock(return_value=True)
+        mock_mapi.update_stocks = AsyncMock()
+
+        agent = _make_agent(owner_bot=owner_bot)
+        await agent.handle_order_created("order.created", {
+            "order_id": str(uuid.uuid4()),
+            "market_order_id": "MKT-E-001",
+        })
+
+    sent_texts = [str(call) for call in owner_bot.send_message.call_args_list]
+    assert any("Эвкалипт" in t for t in sent_texts)
+
+
+@pytest.mark.asyncio
+async def test_handle_order_created_no_alert_when_eucalyptus_ok():
+    owner_bot = AsyncMock()
+    owner_bot.send_message = AsyncMock()
+    fake_items = [{"sku": "bouquet-e-red", "count": 1, "price": 500}]
+
+    with patch("app.agents.flower_stock.agent.market_api") as mock_mapi, \
+         patch("app.agents.flower_stock.agent.stock_ops") as mock_ops:
+        mock_mapi.get_order_items = AsyncMock(return_value=fake_items)
+        mock_ops.save_order_items = AsyncMock()
+        mock_ops.reserve_materials = AsyncMock()
+        mock_ops.compute_available_stocks = AsyncMock(return_value={})
+        mock_ops.is_eucalyptus_low = AsyncMock(return_value=False)
+        mock_mapi.update_stocks = AsyncMock()
+
+        agent = _make_agent(owner_bot=owner_bot)
+        await agent.handle_order_created("order.created", {
+            "order_id": str(uuid.uuid4()),
+            "market_order_id": "MKT-E-002",
+        })
+
+    sent_texts = [str(call) for call in owner_bot.send_message.call_args_list]
+    assert not any("Эвкалипт" in t for t in sent_texts)
+
+
+@pytest.mark.asyncio
+async def test_handle_order_created_no_alert_when_no_e_sku():
+    owner_bot = AsyncMock()
+    owner_bot.send_message = AsyncMock()
+    fake_items = [{"sku": "bouquet-classic", "count": 1, "price": 500}]
+
+    with patch("app.agents.flower_stock.agent.market_api") as mock_mapi, \
+         patch("app.agents.flower_stock.agent.stock_ops") as mock_ops:
+        mock_mapi.get_order_items = AsyncMock(return_value=fake_items)
+        mock_ops.save_order_items = AsyncMock()
+        mock_ops.reserve_materials = AsyncMock()
+        mock_ops.compute_available_stocks = AsyncMock(return_value={})
+        mock_ops.is_eucalyptus_low = AsyncMock(return_value=True)
+        mock_mapi.update_stocks = AsyncMock()
+
+        agent = _make_agent(owner_bot=owner_bot)
+        await agent.handle_order_created("order.created", {
+            "order_id": str(uuid.uuid4()),
+            "market_order_id": "MKT-NOEUC-001",
+        })
+
+    mock_ops.is_eucalyptus_low.assert_not_awaited()
