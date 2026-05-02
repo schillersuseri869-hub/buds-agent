@@ -79,6 +79,21 @@ class FlowerStockAgent:
             except Exception as exc:
                 logger.error("Failed to send florist alert: %s", exc)
 
+    async def get_stock_report(self) -> str:
+        from sqlalchemy import select
+        from app.models.raw_materials import RawMaterial
+        async with self._db_factory() as db:
+            result = await db.execute(select(RawMaterial).order_by(RawMaterial.name))
+            materials = list(result.scalars().all())
+        if not materials:
+            return "Склад пуст."
+        lines = ["📦 Склад:\n"]
+        for m in materials:
+            net = m.physical_stock - m.reserved
+            reserved_str = f" (резерв: {_fmt(m.reserved)})" if m.reserved > 0 else ""
+            lines.append(f"• {m.name} — {_fmt(net)} {m.unit}{reserved_str}")
+        return "\n".join(lines)
+
     async def _update_storefront(self) -> None:
         try:
             async with self._db_factory() as db:

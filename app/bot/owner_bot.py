@@ -39,6 +39,11 @@ def register_pricing_callbacks(pricing_agent) -> None:
 
 
 def register_stock_commands(flower_stock_agent) -> None:
+    @owner_router.message(Command("stock"))
+    async def handle_stock_command(message: Message):
+        report = await flower_stock_agent.get_stock_report()
+        await message.answer(report)
+
     @owner_router.message()
     async def handle_stock_message(message: Message):
         if message.from_user is None:
