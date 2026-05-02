@@ -12,8 +12,13 @@ from app.bot.owner_bot import (
     register_order_callbacks as register_owner_callbacks,
     register_stock_commands,
     register_pricing_callbacks,
+    register_eucalyptus_callbacks as register_owner_eucalyptus_callbacks,
 )
-from app.bot.florist_bot import create_florist_bot, register_order_callbacks as register_florist_callbacks
+from app.bot.florist_bot import (
+    create_florist_bot,
+    register_order_callbacks as register_florist_callbacks,
+    register_eucalyptus_callbacks as register_florist_eucalyptus_callbacks,
+)
 from app.core.event_bus import EventBus
 from app.database import AsyncSessionLocal
 from app.config import settings
@@ -55,7 +60,7 @@ async def lifespan(app: FastAPI):
     await event_bus.subscribe("order.delivered", order_agent.handle_order_status)
     await order_agent.recover_timers()
 
-    flower_stock_agent = FlowerStockAgent(AsyncSessionLocal, owner_bot, settings)
+    flower_stock_agent = FlowerStockAgent(AsyncSessionLocal, owner_bot, settings, florist_bot=florist_bot)
     await event_bus.subscribe("order.created", flower_stock_agent.handle_order_created)
     await event_bus.subscribe("order.ready", flower_stock_agent.handle_order_ready)
     await event_bus.subscribe("order.cancelled", flower_stock_agent.handle_order_released)
@@ -65,6 +70,9 @@ async def lifespan(app: FastAPI):
     if florist_bot:
         register_florist_callbacks(order_agent)
     register_stock_commands(flower_stock_agent)
+    register_owner_eucalyptus_callbacks(flower_stock_agent)
+    if florist_bot:
+        register_florist_eucalyptus_callbacks(flower_stock_agent)
 
     scheduler = AsyncIOScheduler()
     pricing_agent = PricingAgent(AsyncSessionLocal, owner_bot, settings, scheduler)
