@@ -57,6 +57,24 @@ class FlowerStockAgent:
         self._settings = settings
         self._florist_bot = florist_bot
 
+    async def push_write_off_to_grist(self, material, wo_type: str, quantity) -> None:
+        if not self._settings.grist_api_key:
+            return
+        try:
+            from app.agents.flower_stock.sheets_loader import push_write_off_to_grist
+            await push_write_off_to_grist(
+                self._settings.grist_url,
+                self._settings.grist_doc_id,
+                self._settings.grist_api_key,
+                material.name,
+                wo_type,
+                quantity,
+                material.unit,
+                material.cost_per_unit,
+            )
+        except Exception as exc:
+            logger.error("push_write_off_to_grist(%s) failed: %s", material.name, exc)
+
     async def sync_to_grist(self, material) -> None:
         """Push updated physical_stock to Grist and send low-stock alert if needed."""
         if not material.grist_row_id or not self._settings.grist_api_key:

@@ -102,6 +102,7 @@ def _make_complete_handler(db_factory: async_sessionmaker, flower_stock_agent):
         await state.clear()
         await flower_stock_agent._update_storefront()
         await flower_stock_agent.sync_to_grist(mat)
+        await flower_stock_agent.push_write_off_to_grist(mat, wo_type, qty)
         await message.answer(
             f"✅ Списано: {_fmt(qty)} {mat.unit} «{mat.name}» ({label})\n"
             f"Остаток: {_fmt(mat.physical_stock)} {mat.unit}."

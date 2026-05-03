@@ -165,6 +165,51 @@ async def load_recipes(
     return count
 
 
+_WRITE_OFF_TYPE_LABELS = {
+    "defect": "Брак",
+    "spoilage": "Порча",
+    "extra_debit": "К заказу",
+}
+
+
+async def push_write_off_to_grist(
+    base_url: str,
+    doc_id: str,
+    api_key: str,
+    material_name: str,
+    wo_type: str,
+    quantity: Decimal,
+    unit: str,
+    cost_per_unit: Decimal,
+) -> None:
+    """Append a row to the WriteOffs table in Grist."""
+    from datetime import datetime, timezone
+    total_cost = quantity * cost_per_unit
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    payload = {
+        "records": [{
+            "fields": {
+                "date": ["d", now_ts],
+                "material": material_name,
+                "type": _WRITE_OFF_TYPE_LABELS.get(wo_type, wo_type),
+                "quantity": float(quantity),
+                "unit": unit,
+                "cost_per_unit": float(cost_per_unit),
+                "total_cost": float(total_cost),
+            }
+        }]
+    }
+    url = f"{base_url}/api/docs/{doc_id}/tables/WriteOffs/records"
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            json=payload,
+            timeout=10.0,
+        )
+        response.raise_for_status()
+
+
 async def load_from_grist(
     db: AsyncSession,
     base_url: str,
