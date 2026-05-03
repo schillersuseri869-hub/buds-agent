@@ -31,6 +31,32 @@ def register_eucalyptus_callbacks(flower_stock_agent) -> None:
         await callback.message.edit_text(f"✅ {label}")
 
 
+def register_add_handlers(flower_stock_agent, db_factory) -> None:
+    from app.bot.add_stock_fsm import register_add_stock_handlers
+    register_add_stock_handlers(florist_router, db_factory, flower_stock_agent)
+
+
+def register_write_off_handler(flower_stock_agent, db_factory) -> None:
+    from app.bot.write_off_fsm import register_write_off_handlers
+    register_write_off_handlers(florist_router, db_factory, flower_stock_agent)
+
+
+def register_query_handlers(db_factory) -> None:
+    from app.bot.stock_queries import register_stock_query_handlers
+    register_stock_query_handlers(florist_router, db_factory)
+
+
+def register_cancel_handler() -> None:
+    from aiogram.fsm.context import FSMContext
+
+    @florist_router.message(Command("cancel"))
+    async def cmd_cancel(message: Message, state: FSMContext):
+        current = await state.get_state()
+        if current is not None:
+            await state.clear()
+            await message.answer("Отменено.")
+
+
 def create_florist_bot(storage=None) -> tuple[Bot, Dispatcher] | None:
     if not settings.florist_bot_token:
         return None

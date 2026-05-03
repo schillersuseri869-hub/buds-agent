@@ -13,11 +13,20 @@ from app.bot.owner_bot import (
     register_stock_commands,
     register_pricing_callbacks,
     register_eucalyptus_callbacks as register_owner_eucalyptus_callbacks,
+    register_add_handlers as register_owner_add,
+    register_write_off_handler as register_owner_write_off,
+    register_inventory_handler as register_owner_inventory,
+    register_query_handlers as register_owner_queries,
+    register_cancel_handler as register_owner_cancel,
 )
 from app.bot.florist_bot import (
     create_florist_bot,
     register_order_callbacks as register_florist_callbacks,
     register_eucalyptus_callbacks as register_florist_eucalyptus_callbacks,
+    register_add_handlers as register_florist_add,
+    register_write_off_handler as register_florist_write_off,
+    register_query_handlers as register_florist_queries,
+    register_cancel_handler as register_florist_cancel,
 )
 from app.core.event_bus import EventBus
 from app.database import AsyncSessionLocal
@@ -41,6 +50,12 @@ async def lifespan(app: FastAPI):
     owner_bot, owner_dp = create_owner_bot(fsm_storage)
     await owner_bot.set_my_commands([
         BotCommand(command="stock", description="Остатки склада"),
+        BotCommand(command="add", description="Записать приход"),
+        BotCommand(command="write_off", description="Списать материал"),
+        BotCommand(command="inventory", description="Инвентаризация"),
+        BotCommand(command="history", description="История движений"),
+        BotCommand(command="report", description="Отчёт за период"),
+        BotCommand(command="cancel", description="Отменить текущее действие"),
         BotCommand(command="status", description="Статус бота"),
     ])
     owner_task = asyncio.create_task(owner_dp.start_polling(owner_bot))
@@ -86,6 +101,18 @@ async def lifespan(app: FastAPI):
     pricing_agent.schedule()
     scheduler.start()
     register_pricing_callbacks(pricing_agent)
+
+    register_owner_cancel()
+    register_owner_add(flower_stock_agent, AsyncSessionLocal)
+    register_owner_write_off(flower_stock_agent, AsyncSessionLocal)
+    register_owner_inventory(flower_stock_agent, AsyncSessionLocal)
+    register_owner_queries(AsyncSessionLocal)
+
+    if florist_bot:
+        register_florist_cancel()
+        register_florist_add(flower_stock_agent, AsyncSessionLocal)
+        register_florist_write_off(flower_stock_agent, AsyncSessionLocal)
+        register_florist_queries(AsyncSessionLocal)
 
     yield
 

@@ -1,5 +1,6 @@
-from aiogram import Bot, Dispatcher, Router
-from aiogram.filters import Command
+from aiogram import Bot, Dispatcher, F, Router
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.state import default_state
 from aiogram.types import Message, CallbackQuery
 from app.config import settings
 
@@ -44,7 +45,7 @@ def register_stock_commands(flower_stock_agent) -> None:
         report = await flower_stock_agent.get_stock_report()
         await message.answer(report)
 
-    @owner_router.message()
+    @owner_router.message(StateFilter(default_state))
     async def handle_stock_message(message: Message):
         if message.from_user is None:
             return
@@ -63,6 +64,37 @@ def register_eucalyptus_callbacks(flower_stock_agent) -> None:
         await flower_stock_agent.handle_eucalyptus_callback(qty_g)
         label = f"{qty_g}г добавлено" if qty_g else "Не добавлять"
         await callback.message.edit_text(f"✅ {label}")
+
+
+def register_add_handlers(flower_stock_agent, db_factory) -> None:
+    from app.bot.add_stock_fsm import register_add_stock_handlers
+    register_add_stock_handlers(owner_router, db_factory, flower_stock_agent)
+
+
+def register_write_off_handler(flower_stock_agent, db_factory) -> None:
+    from app.bot.write_off_fsm import register_write_off_handlers
+    register_write_off_handlers(owner_router, db_factory, flower_stock_agent)
+
+
+def register_inventory_handler(flower_stock_agent, db_factory) -> None:
+    from app.bot.inventory_fsm import register_inventory_handlers
+    register_inventory_handlers(owner_router, db_factory, flower_stock_agent)
+
+
+def register_query_handlers(db_factory) -> None:
+    from app.bot.stock_queries import register_stock_query_handlers
+    register_stock_query_handlers(owner_router, db_factory)
+
+
+def register_cancel_handler() -> None:
+    from aiogram.fsm.context import FSMContext
+
+    @owner_router.message(Command("cancel"))
+    async def cmd_cancel(message: Message, state: FSMContext):
+        current = await state.get_state()
+        if current is not None:
+            await state.clear()
+            await message.answer("Отменено.")
 
 
 def create_owner_bot(storage=None) -> tuple[Bot, Dispatcher]:
