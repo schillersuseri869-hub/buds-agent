@@ -97,12 +97,6 @@ def register_cancel_handler() -> None:
             await message.answer("Отменено.")
 
 
-@owner_router.callback_query()
-async def debug_catch_all_callback(callback: CallbackQuery):
-    print(f"[DEBUG] callback_query received: {callback.data}", flush=True)
-    await callback.answer(f"DEBUG: {callback.data}")
-
-
 def create_owner_bot(storage=None) -> tuple[Bot, Dispatcher]:
     from aiogram.fsm.storage.memory import MemoryStorage
     bot = Bot(token=settings.owner_bot_token)
