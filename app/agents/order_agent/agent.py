@@ -223,7 +223,20 @@ class OrderAgent:
             order.timer_deadline = deadline
             await db.commit()
 
-        await self._notify_all(f"🌸 Новый заказ #{market_order_id}!")
+        items_lines = ""
+        try:
+            items = await market_api.get_order_items(
+                market_order_id,
+                self._settings.market_campaign_id,
+                self._settings.market_api_token,
+            )
+            if items:
+                lines = [f"{it['sku']} × {it['count']} — {it['name']}" for it in items]
+                items_lines = "\n" + "\n".join(lines) + "\n"
+        except Exception as exc:
+            logger.warning("Could not fetch order items for notification: %s", exc)
+
+        await self._notify_all(f"🌸 Новый заказ!{items_lines}\n#{market_order_id}")
         self._schedule_timers(order_id_str, market_order_id, deadline)
 
     def cancel_timers(self, order_id: str) -> None:
