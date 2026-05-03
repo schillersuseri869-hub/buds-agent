@@ -18,6 +18,7 @@ class StockMovement(Base):
     type: Mapped[str] = mapped_column(
         Enum(
             "arrival", "reserve", "debit", "spoilage", "return", "release", "extra_debit",
+            "defect", "inventory_correction",
             name="movement_type",
         ),
         nullable=False,
