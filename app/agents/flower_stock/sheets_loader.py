@@ -19,6 +19,15 @@ def _d(value) -> Decimal:
         return Decimal("0")
 
 
+def _d_or_none(value) -> Decimal | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return Decimal(str(value).replace(",", ".").strip())
+    except InvalidOperation:
+        return None
+
+
 async def _fetch_table(base_url: str, doc_id: str, api_key: str, table: str) -> list[dict]:
     url = f"{base_url}/api/docs/{doc_id}/tables/{table}/records"
     async with httpx.AsyncClient() as client:
@@ -28,7 +37,23 @@ async def _fetch_table(base_url: str, doc_id: str, api_key: str, table: str) -> 
             timeout=30.0,
         )
         response.raise_for_status()
-    return [r["fields"] for r in response.json().get("records", [])]
+    return [{**r["fields"], "_grist_id": r["id"]} for r in response.json().get("records", [])]
+
+
+async def push_material_to_grist(
+    base_url: str, doc_id: str, api_key: str, row_id: int, physical_stock: Decimal
+) -> None:
+    """PATCH a single Materials row in Grist with the new physical_stock value."""
+    url = f"{base_url}/api/docs/{doc_id}/tables/Materials/records"
+    payload = {"records": [{"id": row_id, "fields": {"physical_stock": float(physical_stock)}}]}
+    async with httpx.AsyncClient() as client:
+        response = await client.patch(
+            url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            json=payload,
+            timeout=10.0,
+        )
+        response.raise_for_status()
 
 
 async def load_materials(db: AsyncSession, rows: list[dict]) -> dict[str, RawMaterial]:
@@ -41,6 +66,8 @@ async def load_materials(db: AsyncSession, rows: list[dict]) -> dict[str, RawMat
         unit = str(row.get("unit", "")).strip()
         physical_stock = _d(row.get("physical_stock", 0))
         cost_per_unit = _d(row.get("cost_per_unit", 0))
+        grist_row_id = row.get("_grist_id")
+        min_stock = _d_or_none(row.get("min_stock"))
 
         result = await db.execute(select(RawMaterial).where(RawMaterial.name == name))
         mat = result.scalar_one_or_none()
@@ -48,16 +75,19 @@ async def load_materials(db: AsyncSession, rows: list[dict]) -> dict[str, RawMat
             mat = RawMaterial(
                 name=name, type=type_, unit=unit,
                 physical_stock=physical_stock, cost_per_unit=cost_per_unit,
+                grist_row_id=grist_row_id, min_stock=min_stock,
             )
             db.add(mat)
         else:
             mat.type = type_
             mat.unit = unit
             mat.cost_per_unit = cost_per_unit
+            mat.grist_row_id = grist_row_id
+            mat.min_stock = min_stock
         await db.commit()
         await db.refresh(mat)
         loaded[name] = mat
-        logger.info("Loaded material: %s", name)
+        logger.info("Loaded material: %s (grist_row_id=%s, min_stock=%s)", name, grist_row_id, min_stock)
     return loaded
 
 
@@ -140,7 +170,8 @@ async def load_from_grist(
     base_url: str,
     doc_id: str,
     api_key: str,
-) -> None:
+) -> tuple[int, int]:
+    """Load all data from Grist into DB (upsert). Returns (n_materials, n_products)."""
     mat_rows = await _fetch_table(base_url, doc_id, api_key, "Materials")
     prod_rows = await _fetch_table(base_url, doc_id, api_key, "Products")
     recipe_rows = await _fetch_table(base_url, doc_id, api_key, "Recipes")
@@ -152,3 +183,4 @@ async def load_from_grist(
         "Grist load complete: %d materials, %d products",
         len(materials), len(products),
     )
+    return len(materials), len(products)

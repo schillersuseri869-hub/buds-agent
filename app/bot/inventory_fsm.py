@@ -110,3 +110,4 @@ def register_inventory_handlers(
         await state.update_data(index=data["index"] + 1, corrections=corrections)
         await _ask_next(message, state, db_factory)
         await flower_stock_agent._update_storefront()
+        await flower_stock_agent.sync_to_grist(mat)

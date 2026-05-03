@@ -61,6 +61,7 @@ def _make_price_handler(db_factory: async_sessionmaker, flower_stock_agent):
             mat = await stock_ops.record_arrival(db, material_id, qty, price)
         await state.clear()
         await flower_stock_agent._update_storefront()
+        await flower_stock_agent.sync_to_grist(mat)
         await message.answer(
             f"✅ Приход: {_fmt(qty)} {mat.unit} «{mat.name}» по {_fmt(price)}₽\n"
             f"Остаток: {_fmt(mat.physical_stock)} {mat.unit}."

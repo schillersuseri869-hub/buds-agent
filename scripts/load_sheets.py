@@ -27,14 +27,14 @@ async def main() -> None:
     engine = create_async_engine(settings.database_url, echo=False)
     Session = async_sessionmaker(engine, expire_on_commit=False)
     async with Session() as db:
-        await load_from_grist(
+        n_mat, n_prod = await load_from_grist(
             db,
             settings.grist_url,
             settings.grist_doc_id,
             settings.grist_api_key,
         )
     await engine.dispose()
-    print("Done.")
+    print(f"Done: {n_mat} materials, {n_prod} products.")
 
 
 asyncio.run(main())

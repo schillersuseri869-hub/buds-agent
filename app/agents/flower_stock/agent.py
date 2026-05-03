@@ -57,6 +57,27 @@ class FlowerStockAgent:
         self._settings = settings
         self._florist_bot = florist_bot
 
+    async def sync_to_grist(self, material) -> None:
+        """Push updated physical_stock to Grist and send low-stock alert if needed."""
+        if not material.grist_row_id or not self._settings.grist_api_key:
+            return
+        try:
+            from app.agents.flower_stock.sheets_loader import push_material_to_grist
+            await push_material_to_grist(
+                self._settings.grist_url,
+                self._settings.grist_doc_id,
+                self._settings.grist_api_key,
+                material.grist_row_id,
+                material.physical_stock,
+            )
+        except Exception as exc:
+            logger.error("sync_to_grist(%s) failed: %s", material.name, exc)
+        if material.min_stock is not None and material.physical_stock <= material.min_stock:
+            await self._alert_all(
+                f"⚠️ «{material.name}»: остаток {_fmt(material.physical_stock)} {material.unit} "
+                f"(минимум {_fmt(material.min_stock)} {material.unit})"
+            )
+
     async def _alert(self, message: str) -> None:
         try:
             await self._owner_bot.send_message(self._settings.owner_telegram_id, message)

@@ -13,6 +13,7 @@ from app.bot.owner_bot import (
     register_stock_commands,
     register_pricing_callbacks,
     register_eucalyptus_callbacks as register_owner_eucalyptus_callbacks,
+    register_sync_handler as register_owner_sync,
     register_add_handlers as register_owner_add,
     register_write_off_handler as register_owner_write_off,
     register_inventory_handler as register_owner_inventory,
@@ -49,6 +50,7 @@ async def lifespan(app: FastAPI):
     fsm_storage = RedisStorage(redis)
     owner_bot, owner_dp = create_owner_bot(fsm_storage)
     await owner_bot.set_my_commands([
+        BotCommand(command="sync", description="Синхронизировать с Grist"),
         BotCommand(command="stock", description="Остатки склада"),
         BotCommand(command="add", description="Записать приход"),
         BotCommand(command="write_off", description="Списать материал"),
@@ -107,6 +109,7 @@ async def lifespan(app: FastAPI):
     register_pricing_callbacks(pricing_agent)
 
     register_owner_cancel()
+    register_owner_sync(flower_stock_agent, AsyncSessionLocal)
     register_owner_add(flower_stock_agent, AsyncSessionLocal)
     register_owner_write_off(flower_stock_agent, AsyncSessionLocal)
     register_owner_inventory(flower_stock_agent, AsyncSessionLocal)
