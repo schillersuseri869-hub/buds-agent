@@ -52,7 +52,7 @@ async def download_and_parse_report(file_url: str, token: str) -> dict[str, Deci
         text = response.text
 
     prices: dict[str, Decimal] = {}
-    reader = csv.DictReader(io.StringIO(text), delimiter="\t")
+    reader = csv.DictReader(io.StringIO(text, newline=""), delimiter="\t")
     for row in reader:
         sku = (row.get("offerId") or row.get("sku") or "").strip()
         raw_price = (row.get("storefrontPrice") or row.get("price") or "").strip()
