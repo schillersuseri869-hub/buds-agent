@@ -51,7 +51,7 @@ class WriteOffStates(StatesGroup):
 async def _build_materials_keyboard(db_factory: async_sessionmaker) -> InlineKeyboardMarkup:
     async with db_factory() as db:
         result = await db.execute(select(RawMaterial).order_by(RawMaterial.name))
-        materials = list(result.scalars().all())
+        materials = [m for m in result.scalars().all() if m.physical_stock > 0]
     buttons = [
         [InlineKeyboardButton(
             text=f"{m.name} ({_fmt(m.physical_stock)} {m.unit})",
