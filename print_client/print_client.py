@@ -91,7 +91,7 @@ def print_label(pdf_bytes: bytes, job_id: str) -> bool:
         import win32ui
         from PIL import ImageWin
         # Render portrait sticker (40mm × 58mm), rotate 90° → landscape on tape (58mm × 40mm)
-        img = render_pdf_to_image(pdf_bytes, STICKER_WIDTH_MM, STICKER_HEIGHT_MM).rotate(90, expand=True).convert("RGB")
+        img = render_pdf_to_image(pdf_bytes, STICKER_WIDTH_MM, STICKER_HEIGHT_MM).rotate(-90, expand=True).convert("RGB")
         hdc = win32ui.CreateDC()
         hdc.CreatePrinterDC(PRINTER_NAME)
         dpi_x = hdc.GetDeviceCaps(88)   # LOGPIXELSX
