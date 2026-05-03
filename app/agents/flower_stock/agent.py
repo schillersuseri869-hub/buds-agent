@@ -110,10 +110,12 @@ class FlowerStockAgent:
             return "Склад пуст."
         lines = ["📦 Склад:\n"]
         for m in materials:
+            if m.physical_stock == 0:
+                continue
             net = m.physical_stock - m.reserved
             reserved_str = f" (резерв: {_fmt(m.reserved)})" if m.reserved > 0 else ""
             lines.append(f"• {m.name} — {_fmt(net)} {m.unit}{reserved_str}")
-        return "\n".join(lines)
+        return "\n".join(lines) if len(lines) > 1 else "Склад пуст."
 
     async def _update_storefront(self) -> None:
         try:
