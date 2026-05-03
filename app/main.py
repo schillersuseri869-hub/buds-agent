@@ -58,14 +58,19 @@ async def lifespan(app: FastAPI):
         BotCommand(command="cancel", description="Отменить текущее действие"),
         BotCommand(command="status", description="Статус бота"),
     ])
-    owner_task = asyncio.create_task(owner_dp.start_polling(owner_bot))
+    _allowed = ["message", "callback_query"]
+    owner_task = asyncio.create_task(
+        owner_dp.start_polling(owner_bot, allowed_updates=_allowed)
+    )
 
     florist_result = create_florist_bot(fsm_storage)
     florist_task = None
     florist_bot = None
     if florist_result:
         florist_bot, florist_dp = florist_result
-        florist_task = asyncio.create_task(florist_dp.start_polling(florist_bot))
+        florist_task = asyncio.create_task(
+            florist_dp.start_polling(florist_bot, allowed_updates=_allowed)
+        )
 
     print_agent = PrintAgent(redis, AsyncSessionLocal, owner_bot, settings)
     await event_bus.subscribe("order.created", print_agent.handle_order_created)

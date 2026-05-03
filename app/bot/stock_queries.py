@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
@@ -40,6 +40,8 @@ def _fmt(d: Decimal) -> str:
 
 
 def register_stock_query_handlers(router: Router, db_factory: async_sessionmaker) -> None:
+    logger.info("register_stock_query_handlers called on router %s", router)
+
     @router.message(Command("history"))
     async def cmd_history(message: Message):
         async with db_factory() as db:
@@ -57,8 +59,9 @@ def register_stock_query_handlers(router: Router, db_factory: async_sessionmaker
             reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
         )
 
-    @router.callback_query(lambda c: c.data and c.data.startswith("hist_mat:"))
+    @router.callback_query(F.data.startswith("hist_mat:"))
     async def handle_history_material(callback: CallbackQuery):
+        logger.info("handle_history_material fired: %s", callback.data)
         try:
             material_id = uuid.UUID(callback.data.split(":", 1)[1])
             async with db_factory() as db:
@@ -89,7 +92,7 @@ def register_stock_query_handlers(router: Router, db_factory: async_sessionmaker
     async def cmd_report(message: Message):
         await message.answer("Выберите период:", reply_markup=_REPORT_KEYBOARD)
 
-    @router.callback_query(lambda c: c.data and c.data.startswith("report:"))
+    @router.callback_query(F.data.startswith("report:"))
     async def handle_report_period(callback: CallbackQuery):
         period = callback.data.split(":", 1)[1]
         now = datetime.now(timezone.utc)
