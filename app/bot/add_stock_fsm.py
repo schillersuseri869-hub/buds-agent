@@ -85,7 +85,7 @@ def register_add_stock_handlers(
         material_id_str = callback.data.split(":", 1)[1]
         async with db_factory() as db:
             result = await db.execute(
-                select(RawMaterial).where(RawMaterial.id == material_id_str)
+                select(RawMaterial).where(RawMaterial.id == uuid.UUID(material_id_str))
             )
             material = result.scalar_one_or_none()
         if material is None:
