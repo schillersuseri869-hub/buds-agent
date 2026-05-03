@@ -59,27 +59,31 @@ def register_stock_query_handlers(router: Router, db_factory: async_sessionmaker
 
     @router.callback_query(lambda c: c.data and c.data.startswith("hist_mat:"))
     async def handle_history_material(callback: CallbackQuery):
-        material_id = uuid.UUID(callback.data.split(":", 1)[1])
-        async with db_factory() as db:
-            result = await db.execute(
-                select(RawMaterial).where(RawMaterial.id == material_id)
-            )
-            material = result.scalar_one_or_none()
-            movements = await stock_ops.get_material_history(db, material_id)
-        if material is None:
-            await callback.answer("Материал не найден.")
-            return
-        if not movements:
-            await callback.message.edit_text(f"«{material.name}» — нет движений.")
+        try:
+            material_id = uuid.UUID(callback.data.split(":", 1)[1])
+            async with db_factory() as db:
+                result = await db.execute(
+                    select(RawMaterial).where(RawMaterial.id == material_id)
+                )
+                material = result.scalar_one_or_none()
+                movements = await stock_ops.get_material_history(db, material_id)
+            if material is None:
+                await callback.answer("Материал не найден.")
+                return
+            if not movements:
+                await callback.message.edit_text(f"«{material.name}» — нет движений.")
+                await callback.answer()
+                return
+            lines = [f"📋 История: «{material.name}»\n"]
+            for m in movements:
+                ts = m.created_at.strftime("%d.%m %H:%M")
+                label = _MOVEMENT_LABELS.get(m.type, m.type)
+                lines.append(f"{ts} · {label} {_fmt(m.quantity)} {material.unit}")
+            await callback.message.edit_text("\n".join(lines))
             await callback.answer()
-            return
-        lines = [f"📋 История: «{material.name}»\n"]
-        for m in movements:
-            ts = m.created_at.strftime("%d.%m %H:%M")
-            label = _MOVEMENT_LABELS.get(m.type, m.type)
-            lines.append(f"{ts} · {label} {_fmt(m.quantity)} {material.unit}")
-        await callback.message.edit_text("\n".join(lines))
-        await callback.answer()
+        except Exception as e:
+            logger.error("handle_history_material: %s", e, exc_info=True)
+            await callback.answer(f"Ошибка: {e}")
 
     @router.message(Command("report"))
     async def cmd_report(message: Message):
