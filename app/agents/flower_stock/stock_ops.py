@@ -232,11 +232,20 @@ async def find_material_by_name(db: AsyncSession, name: str) -> RawMaterial | No
     return result.scalar_one_or_none()
 
 
-async def compute_available_stocks(db: AsyncSession) -> dict[str, int]:
+def _is_packaging(name: str) -> bool:
+    return name.startswith("box") or name.startswith("con-kit")
+
+
+async def compute_available_stocks(
+    db: AsyncSession,
+) -> tuple[dict[str, int], list[str]]:
     """
     Compute how many units of each active product can be sold.
-    Returns {market_sku: available_count} for all active products.
-    available = physical_stock − reserved − 2  (per RawMaterial.available property)
+    Returns (stocks, warnings):
+      - stocks: {market_sku: available_count}
+      - warnings: alert messages for packaging (box/con-kit) that ran out.
+    Only flower materials limit the storefront count.
+    Box/con-kit shortages produce a warning but do NOT remove the product.
     """
     result = await db.execute(select(RawMaterial))
     materials = {m.id: m for m in result.scalars().all()}
@@ -251,6 +260,8 @@ async def compute_available_stocks(db: AsyncSession) -> dict[str, int]:
     )
 
     stocks: dict[str, int] = {}
+    low_packaging: set[str] = set()
+
     for product in result.scalars().all():
         product_recipes = recipes.get(product.id, [])
         if not product_recipes:
@@ -261,12 +272,19 @@ async def compute_available_stocks(db: AsyncSession) -> dict[str, int]:
             mat = materials.get(recipe.material_id)
             if mat is None or recipe.quantity <= 0:
                 counts.append(0)
+                continue
+            avail = mat.available
+            if _is_packaging(mat.name):
+                if avail <= 0:
+                    low_packaging.add(mat.name)
             else:
-                avail = mat.available
                 counts.append(max(0, int(avail / recipe.quantity)) if avail > 0 else 0)
         stocks[product.market_sku] = min(counts) if counts else 0
 
-    return stocks
+    warnings = [
+        f"⚠️ Упаковка «{name}» закончилась — пополните склад." for name in sorted(low_packaging)
+    ]
+    return stocks, warnings
 
 
 async def is_eucalyptus_low(db: AsyncSession) -> bool:

@@ -56,6 +56,7 @@ class FlowerStockAgent:
         self._owner_bot = owner_bot
         self._settings = settings
         self._florist_bot = florist_bot
+        self._last_packaging_warnings: set[str] = set()
 
     async def push_write_off_to_grist(self, material, wo_type: str, quantity) -> None:
         if not self._settings.grist_api_key:
@@ -138,13 +139,17 @@ class FlowerStockAgent:
     async def _update_storefront(self) -> None:
         try:
             async with self._db_factory() as db:
-                stocks = await stock_ops.compute_available_stocks(db)
+                stocks, warnings = await stock_ops.compute_available_stocks(db)
             await market_api.update_stocks(
                 self._settings.market_campaign_id,
                 self._settings.market_api_token,
                 self._settings.market_warehouse_id,
                 stocks,
             )
+            new_warnings = set(warnings)
+            for w in sorted(new_warnings - self._last_packaging_warnings):
+                await self._alert_all(w)
+            self._last_packaging_warnings = new_warnings
         except Exception as exc:
             logger.error("_update_storefront failed: %s", exc)
             await self._alert(f"Ошибка обновления витрины Маркета: {exc}")
