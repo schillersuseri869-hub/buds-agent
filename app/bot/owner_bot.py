@@ -65,8 +65,9 @@ def register_eucalyptus_callbacks(flower_stock_agent) -> None:
         await callback.message.edit_text(f"✅ {label}")
 
 
-def create_owner_bot() -> tuple[Bot, Dispatcher]:
+def create_owner_bot(storage=None) -> tuple[Bot, Dispatcher]:
+    from aiogram.fsm.storage.memory import MemoryStorage
     bot = Bot(token=settings.owner_bot_token)
-    dp = Dispatcher()
+    dp = Dispatcher(storage=storage or MemoryStorage())
     dp.include_router(owner_router)
     return bot, dp

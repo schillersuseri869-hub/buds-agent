@@ -31,10 +31,11 @@ def register_eucalyptus_callbacks(flower_stock_agent) -> None:
         await callback.message.edit_text(f"✅ {label}")
 
 
-def create_florist_bot() -> tuple[Bot, Dispatcher] | None:
+def create_florist_bot(storage=None) -> tuple[Bot, Dispatcher] | None:
     if not settings.florist_bot_token:
         return None
+    from aiogram.fsm.storage.memory import MemoryStorage
     bot = Bot(token=settings.florist_bot_token)
-    dp = Dispatcher()
+    dp = Dispatcher(storage=storage or MemoryStorage())
     dp.include_router(florist_router)
     return bot, dp

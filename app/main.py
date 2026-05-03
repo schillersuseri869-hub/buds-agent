@@ -28,27 +28,29 @@ from app.agents.flower_stock.agent import FlowerStockAgent
 from app.agents.pricing_agent.agent import PricingAgent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram.types import BotCommand
+from aiogram.fsm.storage.redis import RedisStorage
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    owner_bot, owner_dp = create_owner_bot()
+    redis = Redis.from_url(settings.redis_url)
+    event_bus = EventBus(redis)
+    app.state.event_bus = event_bus
+
+    fsm_storage = RedisStorage(redis)
+    owner_bot, owner_dp = create_owner_bot(fsm_storage)
     await owner_bot.set_my_commands([
         BotCommand(command="stock", description="Остатки склада"),
         BotCommand(command="status", description="Статус бота"),
     ])
     owner_task = asyncio.create_task(owner_dp.start_polling(owner_bot))
 
-    florist_result = create_florist_bot()
+    florist_result = create_florist_bot(fsm_storage)
     florist_task = None
     florist_bot = None
     if florist_result:
         florist_bot, florist_dp = florist_result
         florist_task = asyncio.create_task(florist_dp.start_polling(florist_bot))
-
-    redis = Redis.from_url(settings.redis_url)
-    event_bus = EventBus(redis)
-    app.state.event_bus = event_bus
 
     print_agent = PrintAgent(redis, AsyncSessionLocal, owner_bot, settings)
     await event_bus.subscribe("order.created", print_agent.handle_order_created)
