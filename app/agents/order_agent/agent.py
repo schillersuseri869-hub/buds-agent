@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models.orders import Order
 from app.models.florists import Florist
+from app.models.market_products import MarketProduct
 from app.agents.order_agent import market_api
 
 logger = logging.getLogger(__name__)
@@ -231,7 +232,13 @@ class OrderAgent:
                 self._settings.market_api_token,
             )
             if items:
-                lines = [f"{it['sku']} × {it['count']} — {it['name']}" for it in items]
+                async with self._db_factory() as db:
+                    result = await db.execute(select(MarketProduct))
+                    names = {p.market_sku: p.name for p in result.scalars().all()}
+                lines = [
+                    f"{it['sku']} × {it['count']} — {names.get(it['sku'], '?')}"
+                    for it in items
+                ]
                 items_lines = "\n" + "\n".join(lines) + "\n"
         except Exception as exc:
             logger.warning("Could not fetch order items for notification: %s", exc)

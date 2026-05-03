@@ -42,7 +42,6 @@ async def get_order_items(market_order_id: str, campaign_id: int, token: str) ->
     return [
         {
             "sku": item.get("offerId", ""),
-            "name": item.get("offerName", ""),
             "count": item.get("count", 1),
         }
         for item in data.get("order", {}).get("items", [])
