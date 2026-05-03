@@ -1,5 +1,6 @@
 import uuid
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -297,3 +298,102 @@ async def set_eucalyptus_stock(db: AsyncSession, quantity: Decimal) -> RawMateri
     await db.commit()
     await db.refresh(mat)
     return mat
+
+
+async def record_write_off(
+    db: AsyncSession, material_id: uuid.UUID, quantity: Decimal, movement_type: str
+) -> RawMaterial:
+    result = await db.execute(
+        select(RawMaterial).where(RawMaterial.id == material_id).with_for_update()
+    )
+    material = result.scalar_one()
+    cost = quantity * material.cost_per_unit
+    material.physical_stock = max(Decimal("0"), material.physical_stock - quantity)
+    db.add(StockMovement(
+        material_id=material_id,
+        order_id=None,
+        type=movement_type,
+        quantity=quantity,
+        cost=cost,
+    ))
+    await db.commit()
+    await db.refresh(material)
+    return material
+
+
+async def record_inventory_correction(
+    db: AsyncSession, material_id: uuid.UUID, actual_qty: Decimal
+) -> tuple[RawMaterial, Decimal]:
+    result = await db.execute(
+        select(RawMaterial).where(RawMaterial.id == material_id).with_for_update()
+    )
+    material = result.scalar_one()
+    delta = actual_qty - material.physical_stock
+    if delta == Decimal("0"):
+        return material, delta
+    cost = abs(delta) * material.cost_per_unit
+    material.physical_stock = actual_qty
+    db.add(StockMovement(
+        material_id=material_id,
+        order_id=None,
+        type="inventory_correction",
+        quantity=abs(delta),
+        cost=cost,
+        note=f"{delta:+.3f}",
+    ))
+    await db.commit()
+    await db.refresh(material)
+    return material, delta
+
+
+async def get_recent_orders(db: AsyncSession, limit: int = 20) -> list[Order]:
+    result = await db.execute(
+        select(Order).order_by(Order.created_at.desc()).limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def get_material_history(
+    db: AsyncSession, material_id: uuid.UUID, limit: int = 20
+) -> list[StockMovement]:
+    result = await db.execute(
+        select(StockMovement)
+        .where(StockMovement.material_id == material_id)
+        .order_by(StockMovement.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+@dataclass
+class ReportData:
+    arrivals_cost: Decimal
+    write_offs_cost: Decimal
+    current_stock_value: Decimal
+
+
+async def get_report(db: AsyncSession, since: datetime) -> ReportData:
+    result = await db.execute(
+        select(StockMovement).where(StockMovement.created_at >= since)
+    )
+    movements = list(result.scalars().all())
+
+    arrivals_cost = sum(
+        (m.cost for m in movements if m.type == "arrival"), Decimal("0")
+    )
+    write_offs_cost = sum(
+        (m.cost for m in movements if m.type in ("spoilage", "defect", "extra_debit")),
+        Decimal("0"),
+    )
+
+    result = await db.execute(select(RawMaterial))
+    materials = list(result.scalars().all())
+    current_stock_value = sum(
+        (m.physical_stock * m.cost_per_unit for m in materials), Decimal("0")
+    )
+
+    return ReportData(
+        arrivals_cost=arrivals_cost,
+        write_offs_cost=write_offs_cost,
+        current_stock_value=current_stock_value,
+    )
