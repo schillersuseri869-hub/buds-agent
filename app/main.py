@@ -91,7 +91,6 @@ async def lifespan(app: FastAPI):
     register_owner_callbacks(order_agent)
     if florist_bot:
         register_florist_callbacks(order_agent)
-    register_stock_commands(flower_stock_agent)
     register_owner_eucalyptus_callbacks(flower_stock_agent)
     if florist_bot:
         register_florist_eucalyptus_callbacks(flower_stock_agent)
@@ -107,6 +106,7 @@ async def lifespan(app: FastAPI):
     register_owner_write_off(flower_stock_agent, AsyncSessionLocal)
     register_owner_inventory(flower_stock_agent, AsyncSessionLocal)
     register_owner_queries(AsyncSessionLocal)
+    register_stock_commands(flower_stock_agent)
 
     if florist_bot:
         register_florist_cancel()
