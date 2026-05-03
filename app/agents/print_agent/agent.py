@@ -111,7 +111,6 @@ class PrintAgent:
                 market_order_id,
                 self._settings.market_campaign_id,
                 self._settings.market_api_token,
-                format="A9_HORIZONTALLY",
             )
         except Exception as exc:
             logger.error("Label download failed for %s: %s", market_order_id, exc)
