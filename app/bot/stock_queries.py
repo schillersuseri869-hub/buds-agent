@@ -40,8 +40,6 @@ def _fmt(d: Decimal) -> str:
 
 
 def register_stock_query_handlers(router: Router, db_factory: async_sessionmaker) -> None:
-    logger.info("register_stock_query_handlers called on router %s", router)
-
     @router.message(Command("history"))
     async def cmd_history(message: Message):
         async with db_factory() as db:
@@ -61,7 +59,6 @@ def register_stock_query_handlers(router: Router, db_factory: async_sessionmaker
 
     @router.callback_query(F.data.startswith("hist_mat:"))
     async def handle_history_material(callback: CallbackQuery):
-        logger.info("handle_history_material fired: %s", callback.data)
         try:
             material_id = uuid.UUID(callback.data.split(":", 1)[1])
             async with db_factory() as db:
