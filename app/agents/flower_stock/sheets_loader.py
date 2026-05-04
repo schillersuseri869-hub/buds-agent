@@ -68,6 +68,7 @@ async def load_materials(db: AsyncSession, rows: list[dict]) -> dict[str, RawMat
         cost_per_unit = _d(row.get("cost_per_unit", 0))
         grist_row_id = row.get("_grist_id")
         min_stock = _d_or_none(row.get("min_stock"))
+        min_buffer = _d(row.get("min_buffer", 0))
 
         result = await db.execute(select(RawMaterial).where(RawMaterial.name == name))
         mat = result.scalar_one_or_none()
@@ -76,6 +77,7 @@ async def load_materials(db: AsyncSession, rows: list[dict]) -> dict[str, RawMat
                 name=name, type=type_, unit=unit,
                 physical_stock=physical_stock, cost_per_unit=cost_per_unit,
                 grist_row_id=grist_row_id, min_stock=min_stock,
+                min_buffer=min_buffer,
             )
             db.add(mat)
         else:
@@ -84,10 +86,11 @@ async def load_materials(db: AsyncSession, rows: list[dict]) -> dict[str, RawMat
             mat.cost_per_unit = cost_per_unit
             mat.grist_row_id = grist_row_id
             mat.min_stock = min_stock
+            mat.min_buffer = min_buffer
         await db.commit()
         await db.refresh(mat)
         loaded[name] = mat
-        logger.info("Loaded material: %s (grist_row_id=%s, min_stock=%s)", name, grist_row_id, min_stock)
+        logger.info("Loaded material: %s (grist_row_id=%s, min_stock=%s, min_buffer=%s)", name, grist_row_id, min_stock, min_buffer)
     return loaded
 
 

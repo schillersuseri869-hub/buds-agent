@@ -83,7 +83,7 @@ async def lifespan(app: FastAPI):
 
     flower_stock_agent = FlowerStockAgent(AsyncSessionLocal, owner_bot, settings, florist_bot=florist_bot)
 
-    order_agent = OrderAgent(redis, AsyncSessionLocal, owner_bot, florist_bot, event_bus, settings, flower_stock_agent)
+    order_agent = OrderAgent(redis, AsyncSessionLocal, owner_bot, florist_bot, event_bus, settings)
     await event_bus.subscribe("order.created", order_agent.handle_order_created)
     await event_bus.subscribe("order.ready", order_agent.handle_order_status)
     await event_bus.subscribe("order.cancelled", order_agent.handle_order_status)

@@ -14,6 +14,8 @@ from app.models.orders import Order
 from app.models.florists import Florist
 from app.models.market_products import MarketProduct
 from app.agents.order_agent import market_api
+from app.agents.flower_stock import stock_ops
+from app.agents.flower_stock import market_api as stock_market_api
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +37,7 @@ class OrderAgent:
         florist_bot: Bot | None,
         event_bus,
         settings,
-        flower_stock_agent=None,
+        flower_stock_agent=None,  # kept for backwards compat, unused
     ):
         self._redis = redis
         self._db_factory = db_factory
@@ -43,8 +45,26 @@ class OrderAgent:
         self._florist_bot = florist_bot
         self._event_bus = event_bus
         self._settings = settings
-        self._flower_stock_agent = flower_stock_agent
         self._tasks: dict[str, list[asyncio.Task]] = {}
+        self._last_packaging_warnings: set[str] = set()
+
+    async def _update_storefront(self) -> None:
+        try:
+            async with self._db_factory() as db:
+                stocks, warnings = await stock_ops.compute_available_stocks(db)
+            await stock_market_api.update_stocks(
+                self._settings.market_campaign_id,
+                self._settings.market_api_token,
+                self._settings.market_warehouse_id,
+                stocks,
+            )
+            new_warnings = set(warnings)
+            for w in sorted(new_warnings - self._last_packaging_warnings):
+                await self._alert(w)
+            self._last_packaging_warnings = new_warnings
+        except Exception as exc:
+            logger.error("_update_storefront failed: %s", exc)
+            await self._alert(f"Ошибка обновления витрины Маркета: {exc}")
 
     async def _alert(self, message: str) -> None:
         try:
@@ -184,8 +204,12 @@ class OrderAgent:
             "market_order_id": market_order_id,
         })
         await self._alert(f"⚠️ Просрочка заказа #{market_order_id}! Зайдите в Маркет вручную.")
-        if self._flower_stock_agent:
-            await self._flower_stock_agent.release_for_order(uuid.UUID(order_id))
+        try:
+            async with self._db_factory() as db:
+                await stock_ops.release_materials(db, uuid.UUID(order_id))
+            await self._update_storefront()
+        except Exception as exc:
+            logger.error("release_materials(timeout) failed for %s: %s", order_id, exc)
 
     def _schedule_timers(self, order_id: str, market_order_id: str, deadline: datetime) -> None:
         now = datetime.now(timezone.utc)
@@ -251,8 +275,15 @@ class OrderAgent:
         await self._notify_all(f"🌸 Новый заказ!{items_lines}\n#{market_order_id}")
         self._schedule_timers(order_id_str, market_order_id, deadline)
 
-        if self._flower_stock_agent and items:
-            await self._flower_stock_agent.reserve_for_order(order_uuid, items)
+        if items:
+            try:
+                async with self._db_factory() as db:
+                    await stock_ops.save_order_items(db, order_uuid, items)
+                async with self._db_factory() as db:
+                    await stock_ops.reserve_materials(db, order_uuid, items)
+                await self._update_storefront()
+            except Exception as exc:
+                logger.error("reserve_materials failed for %s: %s", market_order_id, exc)
 
     def cancel_timers(self, order_id: str) -> None:
         tasks = self._tasks.pop(order_id, [])
@@ -308,11 +339,26 @@ class OrderAgent:
         self.cancel_timers(order_id_str)
         await self._clear_button_messages(order_id_str)
 
-        if self._flower_stock_agent:
-            if channel == "order.ready":
-                await self._flower_stock_agent.debit_for_order(order_uuid)
-            elif channel == "order.cancelled":
-                await self._flower_stock_agent.release_for_order(order_uuid)
+        if channel == "order.ready":
+            try:
+                async with self._db_factory() as db:
+                    await stock_ops.debit_materials(db, order_uuid)
+                    cost = await stock_ops.compute_order_cost(db, order_uuid)
+                    result2 = await db.execute(select(Order).where(Order.id == order_uuid))
+                    order2 = result2.scalar_one_or_none()
+                    if order2:
+                        order2.estimated_cost = cost
+                        await db.commit()
+                await self._update_storefront()
+            except Exception as exc:
+                logger.error("debit_materials failed for %s: %s", order_id_str, exc)
+        elif channel == "order.cancelled":
+            try:
+                async with self._db_factory() as db:
+                    await stock_ops.release_materials(db, order_uuid)
+                await self._update_storefront()
+            except Exception as exc:
+                logger.error("release_materials failed for %s: %s", order_id_str, exc)
 
     async def recover_timers(self) -> None:
         now = datetime.now(timezone.utc)
@@ -338,8 +384,12 @@ class OrderAgent:
                 await self._alert(
                     f"⚠️ Просрочка при восстановлении: заказ #{order.market_order_id}"
                 )
-                if self._flower_stock_agent:
-                    await self._flower_stock_agent.release_for_order(order.id)
+                try:
+                    async with self._db_factory() as db:
+                        await stock_ops.release_materials(db, order.id)
+                    await self._update_storefront()
+                except Exception as exc:
+                    logger.error("release_materials(recover) failed for %s: %s", order_id, exc)
             else:
                 self._schedule_timers(order_id, order.market_order_id, order.timer_deadline)
 

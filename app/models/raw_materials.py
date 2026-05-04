@@ -22,7 +22,8 @@ class RawMaterial(Base):
     last_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     grist_row_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     min_stock: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 3), nullable=True)
+    min_buffer: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False, default=Decimal("0"))
 
     @property
     def available(self) -> Decimal:
-        return self.physical_stock - self.reserved - Decimal("2")
+        return self.physical_stock - self.reserved - self.min_buffer
