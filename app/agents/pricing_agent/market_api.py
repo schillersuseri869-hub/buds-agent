@@ -2,7 +2,6 @@ import asyncio
 import csv
 import io
 import logging
-from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
 import httpx
@@ -12,13 +11,6 @@ logger = logging.getLogger(__name__)
 _BASE = "https://api.partner.market.yandex.ru"
 _DEFAULT_POLL_INTERVAL = 30
 _DEFAULT_MAX_ATTEMPTS = 10  # 10 × 30s = 5 min
-
-
-@dataclass
-class PricesReport:
-    storefront: dict[str, Decimal] = field(default_factory=dict)
-    catalog: dict[str, Decimal] = field(default_factory=dict)
-    crossed: dict[str, Decimal] = field(default_factory=dict)
 
 
 class ReportGenerationError(Exception):
