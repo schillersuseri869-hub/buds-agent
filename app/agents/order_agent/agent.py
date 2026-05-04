@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 
 _REDIS_BTN_TTL = 7200  # 2 hours
 
+_EVKALIPT_KEYBOARD = InlineKeyboardMarkup(inline_keyboard=[
+    [
+        InlineKeyboardButton(text="200г", callback_data="evk_restock:200"),
+        InlineKeyboardButton(text="400г", callback_data="evk_restock:400"),
+        InlineKeyboardButton(text="600г", callback_data="evk_restock:600"),
+    ],
+    [InlineKeyboardButton(text="Не добавлять", callback_data="evk_restock:0")],
+])
+
 
 async def _sleep_until(target: datetime) -> None:
     delay = (target - datetime.now(timezone.utc)).total_seconds()
@@ -282,6 +291,21 @@ class OrderAgent:
                 async with self._db_factory() as db:
                     await stock_ops.reserve_materials(db, order_uuid, items)
                 await self._update_storefront()
+                has_e_items = any("-e" in item.get("sku", "") for item in items)
+                if has_e_items:
+                    async with self._db_factory() as db:
+                        low = await stock_ops.is_eucalyptus_low(db)
+                    if low:
+                        await self._alert("⚠️ Эвкалипт заканчивается.")
+                        if self._florist_bot and self._settings.florist_telegram_id:
+                            try:
+                                await self._florist_bot.send_message(
+                                    self._settings.florist_telegram_id,
+                                    "⚠️ Эвкалипт заканчивается. Сколько осталось в холодильнике?",
+                                    reply_markup=_EVKALIPT_KEYBOARD,
+                                )
+                            except Exception as exc:
+                                logger.error("eucalyptus alert to florist failed: %s", exc)
             except Exception as exc:
                 logger.error("reserve_materials failed for %s: %s", market_order_id, exc)
 
