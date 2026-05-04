@@ -82,3 +82,45 @@ async def test_run_cycle_sends_summary_when_no_changes():
         await agent.run_cycle()
 
     agent._owner_bot.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_promos_calls_merge_for_each_promo():
+    from app.models.promo import Promo
+
+    session_mock = AsyncMock()
+    session_mock.__aenter__ = AsyncMock(return_value=session_mock)
+    session_mock.__aexit__ = AsyncMock(return_value=False)
+    session_mock.merge = MagicMock()
+    session_mock.commit = AsyncMock()
+    db_factory = MagicMock(return_value=session_mock)
+
+    agent = _make_agent(db_factory=db_factory)
+
+    promos = [
+        {
+            "id": "promo-aaa",
+            "name": "Майская акция",
+            "mechanicsType": "DIRECT_DISCOUNT",
+            "startDate": "2026-05-01",
+            "endDate": "2026-05-31",
+        },
+        {
+            "promoId": "promo-bbb",
+            "name": "Фиксированная цена",
+            "mechanicsType": "FIXED_PRICE",
+            "startDate": None,
+            "endDate": None,
+        },
+    ]
+
+    await agent._sync_promos(promos)
+
+    assert session_mock.merge.call_count == 2
+    first_arg = session_mock.merge.call_args_list[0].args[0]
+    assert isinstance(first_arg, Promo)
+    assert first_arg.promo_id == "promo-aaa"
+    assert first_arg.name == "Майская акция"
+    assert first_arg.type == "DIRECT_DISCOUNT"
+    second_arg = session_mock.merge.call_args_list[1].args[0]
+    assert second_arg.promo_id == "promo-bbb"

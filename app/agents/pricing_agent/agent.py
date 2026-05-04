@@ -19,8 +19,19 @@ from app.models.market_products import MarketProduct
 from app.models.price_history import PriceHistory
 from app.models.price_alerts import PriceAlert
 from app.models.promo_participations import PromoParticipation
+from app.models.promo import Promo
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_dt(value: str | None):
+    from datetime import datetime, timezone
+    if value is None:
+        return None
+    try:
+        return datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+    except (ValueError, AttributeError):
+        return None
 
 
 @dataclass
@@ -76,6 +87,20 @@ class PricingAgent:
             for pp in result.scalars().all():
                 cache.setdefault(pp.promo_id, {})[str(pp.product_id)] = pp.promo_price
         return cache
+
+    async def _sync_promos(self, available_promos: list[dict]) -> None:
+        from datetime import datetime, timezone
+        async with self._db_factory() as db:
+            for promo in available_promos:
+                db.merge(Promo(
+                    promo_id=promo.get("id") or promo.get("promoId"),
+                    name=promo.get("name", ""),
+                    type=promo.get("mechanicsType", ""),
+                    starts_at=_parse_dt(promo.get("startDate")),
+                    ends_at=_parse_dt(promo.get("endDate")),
+                    updated_at=datetime.now(timezone.utc),
+                ))
+            await db.commit()
 
     async def _save_price_history(
         self,
@@ -402,6 +427,7 @@ class PricingAgent:
                 self._settings.market_business_id,
                 self._settings.market_api_token,
             )
+            await self._sync_promos(available_promos)
         except Exception as exc:
             logger.error("get_promos failed: %s", exc)
             result.errors.append(f"Список акций недоступен: {exc}")
