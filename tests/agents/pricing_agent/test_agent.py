@@ -124,3 +124,34 @@ async def test_sync_promos_calls_merge_for_each_promo():
     assert first_arg.type == "DIRECT_DISCOUNT"
     second_arg = session_mock.merge.call_args_list[1].args[0]
     assert second_arg.promo_id == "promo-bbb"
+
+
+@pytest.mark.asyncio
+async def test_update_storefront_prices_sets_field():
+    from decimal import Decimal
+    from app.agents.pricing_agent.market_api import PricesReport
+
+    prod = MagicMock()
+    prod.market_sku = "SKU-001"
+    prod.storefront_price = None
+
+    prod_no_price = MagicMock()
+    prod_no_price.market_sku = "SKU-002"
+    prod_no_price.storefront_price = None
+
+    session_mock = AsyncMock()
+    session_mock.__aenter__ = AsyncMock(return_value=session_mock)
+    session_mock.__aexit__ = AsyncMock(return_value=False)
+    session_mock.add = MagicMock()
+    session_mock.commit = AsyncMock()
+    db_factory = MagicMock(return_value=session_mock)
+
+    agent = _make_agent(db_factory=db_factory)
+
+    report = PricesReport(storefront={"SKU-001": Decimal("1200")})
+    await agent._update_storefront_prices([prod, prod_no_price], report)
+
+    assert prod.storefront_price == Decimal("1200")
+    assert prod_no_price.storefront_price is None  # not in report — don't touch
+    session_mock.add.assert_called_once_with(prod)
+    session_mock.commit.assert_called_once()

@@ -120,6 +120,17 @@ class PricingAgent:
                 ))
             await db.commit()
 
+    async def _update_storefront_prices(
+        self, products: list[MarketProduct], report: "market_api.PricesReport"
+    ) -> None:
+        async with self._db_factory() as db:
+            for prod in products:
+                price = report.storefront.get(prod.market_sku)
+                if price is not None:
+                    prod.storefront_price = price
+                    db.add(prod)
+            await db.commit()
+
     async def _save_alert(self, product_id, alert_type: str, message: str) -> None:
         async with self._db_factory() as db:
             db.add(PriceAlert(
@@ -454,7 +465,7 @@ class PricingAgent:
             logger.error("_phase_promo_management crashed: %s", exc)
             result.errors.append(f"Фаза 4 упала: {exc}")
 
-        # Phase 5: Save history
+        # Phase 5: Save history + storefront prices
         try:
             product_by_id = {str(p.id): p for p in products}
             current_promos: dict[str, Decimal] = {}
@@ -463,6 +474,9 @@ class PricingAgent:
                     if price and pid_str in product_by_id:
                         current_promos[product_by_id[pid_str].market_sku] = price
             await self._save_price_history(products, storefront_prices, current_promos)
+            await self._update_storefront_prices(
+                products, market_api.PricesReport(storefront=storefront_prices)
+            )
         except Exception as exc:
             logger.error("Price history save failed: %s", exc)
 
