@@ -180,3 +180,25 @@ async def test_promo_participation_create(db_session):
     await db_session.commit()
     await db_session.refresh(pp)
     assert pp.promo_id == "promo-abc-123"
+
+
+@pytest.mark.asyncio
+async def test_promo_create(db_session):
+    from datetime import datetime, timezone
+    from app.models.promo import Promo
+
+    promo = Promo(
+        promo_id="PROMO-XYZ-001",
+        name="Скидка мая",
+        type="DIRECT_DISCOUNT",
+        starts_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 5, 31, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 5, 4, tzinfo=timezone.utc),
+    )
+    db_session.add(promo)
+    await db_session.commit()
+    await db_session.refresh(promo)
+
+    assert promo.promo_id == "PROMO-XYZ-001"
+    assert promo.type == "DIRECT_DISCOUNT"
+    assert promo.ends_at.year == 2026
