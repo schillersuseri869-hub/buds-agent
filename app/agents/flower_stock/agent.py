@@ -169,91 +169,57 @@ class FlowerStockAgent:
             logger.error("handle_eucalyptus_callback failed: %s", exc)
             await self._alert(f"Ошибка при обновлении эвкалипта: {exc}")
 
-    async def handle_order_created(self, channel: str, data: dict) -> None:
-        order_id_str = data.get("order_id")
-        market_order_id = data.get("market_order_id")
-        if not order_id_str or not market_order_id:
-            logger.error("order.created missing fields: %s", data)
+    async def reserve_for_order(self, order_uuid: uuid.UUID, items: list[dict]) -> None:
+        """Reserve materials and update storefront. Called by OrderAgent on order.created."""
+        if not items:
             return
         try:
-            order_uuid = uuid.UUID(order_id_str)
-        except ValueError:
-            logger.error("Invalid order_id UUID: %s", order_id_str)
-            return
-
-        try:
-            items = await market_api.get_order_items(
-                market_order_id,
-                self._settings.market_campaign_id,
-                self._settings.market_api_token,
-            )
-        except Exception as exc:
-            logger.error("get_order_items failed for %s: %s", market_order_id, exc)
-            await self._alert(f"Ошибка получения состава заказа #{market_order_id}")
-            return
-
-        async with self._db_factory() as db:
-            await stock_ops.save_order_items(db, order_uuid, items)
-
-        async with self._db_factory() as db:
-            await stock_ops.reserve_materials(db, order_uuid, items)
-
-        await self._update_storefront()
-
-        has_e_items = any("-e" in item.get("sku", "") for item in items)
-        if has_e_items:
             async with self._db_factory() as db:
-                low = await stock_ops.is_eucalyptus_low(db)
-            if low:
-                await self._alert("⚠️ Эвкалипт заканчивается.")
-                if self._florist_bot and self._settings.florist_telegram_id:
-                    try:
-                        await self._florist_bot.send_message(
-                            self._settings.florist_telegram_id,
-                            "⚠️ Эвкалипт заканчивается. Сколько осталось в холодильнике?",
-                            reply_markup=_EVKALIPT_KEYBOARD,
-                        )
-                    except Exception as exc:
-                        logger.error("Failed to send eucalyptus alert to florist: %s", exc)
+                await stock_ops.save_order_items(db, order_uuid, items)
+            async with self._db_factory() as db:
+                await stock_ops.reserve_materials(db, order_uuid, items)
+            await self._update_storefront()
+            has_e_items = any("-e" in item.get("sku", "") for item in items)
+            if has_e_items:
+                async with self._db_factory() as db:
+                    low = await stock_ops.is_eucalyptus_low(db)
+                if low:
+                    await self._alert("⚠️ Эвкалипт заканчивается.")
+                    if self._florist_bot and self._settings.florist_telegram_id:
+                        try:
+                            await self._florist_bot.send_message(
+                                self._settings.florist_telegram_id,
+                                "⚠️ Эвкалипт заканчивается. Сколько осталось в холодильнике?",
+                                reply_markup=_EVKALIPT_KEYBOARD,
+                            )
+                        except Exception as exc:
+                            logger.error("Failed to send eucalyptus alert to florist: %s", exc)
+        except Exception as exc:
+            logger.error("reserve_for_order(%s) failed: %s", order_uuid, exc)
 
-    async def handle_order_ready(self, channel: str, data: dict) -> None:
-        order_id_str = data.get("order_id")
-        if not order_id_str:
-            logger.error("order.ready missing order_id: %s", data)
-            return
+    async def debit_for_order(self, order_uuid: uuid.UUID) -> None:
+        """Debit materials and update storefront. Called by OrderAgent on order.ready."""
         try:
-            order_uuid = uuid.UUID(order_id_str)
-        except ValueError:
-            logger.error("Invalid order_id UUID: %s", order_id_str)
-            return
+            async with self._db_factory() as db:
+                await stock_ops.debit_materials(db, order_uuid)
+                cost = await stock_ops.compute_order_cost(db, order_uuid)
+                result = await db.execute(select(Order).where(Order.id == order_uuid))
+                order = result.scalar_one_or_none()
+                if order:
+                    order.estimated_cost = cost
+                    await db.commit()
+            await self._update_storefront()
+        except Exception as exc:
+            logger.error("debit_for_order(%s) failed: %s", order_uuid, exc)
 
-        async with self._db_factory() as db:
-            await stock_ops.debit_materials(db, order_uuid)
-            cost = await stock_ops.compute_order_cost(db, order_uuid)
-            result = await db.execute(select(Order).where(Order.id == order_uuid))
-            order = result.scalar_one_or_none()
-            if order:
-                order.estimated_cost = cost
-                await db.commit()
-
-        await self._update_storefront()
-
-    async def handle_order_released(self, channel: str, data: dict) -> None:
-        """Handles both order.cancelled and order.timeout."""
-        order_id_str = data.get("order_id")
-        if not order_id_str:
-            logger.error("%s missing order_id: %s", channel, data)
-            return
+    async def release_for_order(self, order_uuid: uuid.UUID) -> None:
+        """Release reserved materials. Called by OrderAgent on cancel/timeout."""
         try:
-            order_uuid = uuid.UUID(order_id_str)
-        except ValueError:
-            logger.error("Invalid order_id UUID: %s", order_id_str)
-            return
-
-        async with self._db_factory() as db:
-            await stock_ops.release_materials(db, order_uuid)
-
-        await self._update_storefront()
+            async with self._db_factory() as db:
+                await stock_ops.release_materials(db, order_uuid)
+            await self._update_storefront()
+        except Exception as exc:
+            logger.error("release_for_order(%s) failed: %s", order_uuid, exc)
 
     def _parse_command(self, text: str) -> dict | None:
         """Parse a Telegram stock command. Returns parsed dict or None."""

@@ -81,19 +81,15 @@ async def lifespan(app: FastAPI):
         on_ack=print_agent.handle_ack,
     )
 
-    order_agent = OrderAgent(redis, AsyncSessionLocal, owner_bot, florist_bot, event_bus, settings)
+    flower_stock_agent = FlowerStockAgent(AsyncSessionLocal, owner_bot, settings, florist_bot=florist_bot)
+
+    order_agent = OrderAgent(redis, AsyncSessionLocal, owner_bot, florist_bot, event_bus, settings, flower_stock_agent)
     await event_bus.subscribe("order.created", order_agent.handle_order_created)
     await event_bus.subscribe("order.ready", order_agent.handle_order_status)
     await event_bus.subscribe("order.cancelled", order_agent.handle_order_status)
     await event_bus.subscribe("order.shipped", order_agent.handle_order_status)
     await event_bus.subscribe("order.delivered", order_agent.handle_order_status)
     await order_agent.recover_timers()
-
-    flower_stock_agent = FlowerStockAgent(AsyncSessionLocal, owner_bot, settings, florist_bot=florist_bot)
-    await event_bus.subscribe("order.created", flower_stock_agent.handle_order_created)
-    await event_bus.subscribe("order.ready", flower_stock_agent.handle_order_ready)
-    await event_bus.subscribe("order.cancelled", flower_stock_agent.handle_order_released)
-    await event_bus.subscribe("order.timeout", flower_stock_agent.handle_order_released)
 
     register_owner_callbacks(order_agent)
     if florist_bot:

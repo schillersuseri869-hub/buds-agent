@@ -35,6 +35,7 @@ class OrderAgent:
         florist_bot: Bot | None,
         event_bus,
         settings,
+        flower_stock_agent=None,
     ):
         self._redis = redis
         self._db_factory = db_factory
@@ -42,6 +43,7 @@ class OrderAgent:
         self._florist_bot = florist_bot
         self._event_bus = event_bus
         self._settings = settings
+        self._flower_stock_agent = flower_stock_agent
         self._tasks: dict[str, list[asyncio.Task]] = {}
 
     async def _alert(self, message: str) -> None:
@@ -182,6 +184,8 @@ class OrderAgent:
             "market_order_id": market_order_id,
         })
         await self._alert(f"⚠️ Просрочка заказа #{market_order_id}! Зайдите в Маркет вручную.")
+        if self._flower_stock_agent:
+            await self._flower_stock_agent.release_for_order(uuid.UUID(order_id))
 
     def _schedule_timers(self, order_id: str, market_order_id: str, deadline: datetime) -> None:
         now = datetime.now(timezone.utc)
@@ -224,6 +228,7 @@ class OrderAgent:
             order.timer_deadline = deadline
             await db.commit()
 
+        items: list[dict] = []
         items_lines = ""
         try:
             items = await market_api.get_order_items(
@@ -245,6 +250,9 @@ class OrderAgent:
 
         await self._notify_all(f"🌸 Новый заказ!{items_lines}\n#{market_order_id}")
         self._schedule_timers(order_id_str, market_order_id, deadline)
+
+        if self._flower_stock_agent and items:
+            await self._flower_stock_agent.reserve_for_order(order_uuid, items)
 
     def cancel_timers(self, order_id: str) -> None:
         tasks = self._tasks.pop(order_id, [])
@@ -300,6 +308,12 @@ class OrderAgent:
         self.cancel_timers(order_id_str)
         await self._clear_button_messages(order_id_str)
 
+        if self._flower_stock_agent:
+            if channel == "order.ready":
+                await self._flower_stock_agent.debit_for_order(order_uuid)
+            elif channel == "order.cancelled":
+                await self._flower_stock_agent.release_for_order(order_uuid)
+
     async def recover_timers(self) -> None:
         now = datetime.now(timezone.utc)
         async with self._db_factory() as db:
@@ -324,6 +338,8 @@ class OrderAgent:
                 await self._alert(
                     f"⚠️ Просрочка при восстановлении: заказ #{order.market_order_id}"
                 )
+                if self._flower_stock_agent:
+                    await self._flower_stock_agent.release_for_order(order.id)
             else:
                 self._schedule_timers(order_id, order.market_order_id, order.timer_deadline)
 
