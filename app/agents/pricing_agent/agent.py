@@ -1,5 +1,6 @@
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
@@ -25,11 +26,13 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_dt(value: str | None):
-    from datetime import datetime, timezone
     if value is None:
         return None
     try:
-        return datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
     except (ValueError, AttributeError):
         return None
 
@@ -89,7 +92,6 @@ class PricingAgent:
         return cache
 
     async def _sync_promos(self, available_promos: list[dict]) -> None:
-        from datetime import datetime, timezone
         async with self._db_factory() as db:
             for promo in available_promos:
                 db.merge(Promo(
@@ -300,7 +302,6 @@ class PricingAgent:
                     reason = rej.get("reason", "")
                     result.alerts.append(f"{sku}: Яндекс отклонил участие в акции ({reason})")
 
-                from datetime import datetime, timezone
                 now = datetime.now(timezone.utc)
                 async with self._db_factory() as db:
                     for offer in offers_to_add:
