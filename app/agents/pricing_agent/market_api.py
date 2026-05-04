@@ -17,6 +17,8 @@ _DEFAULT_MAX_ATTEMPTS = 10  # 10 × 30s = 5 min
 @dataclass
 class PricesReport:
     storefront: dict[str, Decimal] = field(default_factory=dict)
+    catalog: dict[str, Decimal] = field(default_factory=dict)
+    crossed: dict[str, Decimal] = field(default_factory=dict)
 
 
 class ReportGenerationError(Exception):

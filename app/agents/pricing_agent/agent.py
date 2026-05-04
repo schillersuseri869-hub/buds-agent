@@ -105,7 +105,7 @@ class PricingAgent:
     async def _save_price_history(
         self,
         products: list[MarketProduct],
-        storefront_prices: dict[str, Decimal],
+        report: "market_api.PricesReport",
         promo_prices: dict[str, Decimal],
     ) -> None:
         async with self._db_factory() as db:
@@ -113,7 +113,7 @@ class PricingAgent:
                 db.add(PriceHistory(
                     product_id=prod.id,
                     catalog_price=prod.catalog_price,
-                    storefront_price=storefront_prices.get(prod.market_sku),
+                    storefront_price=report.storefront.get(prod.market_sku),
                     min_price=prod.min_price,
                     optimal_price=prod.optimal_price,
                     promo_price=promo_prices.get(prod.market_sku),
@@ -420,12 +420,14 @@ class PricingAgent:
         promo_cache = await self._load_promo_cache()
 
         # Phase 1: Fetch storefront prices (async report)
+        report = market_api.PricesReport()
         storefront_prices: dict[str, Decimal] = {}
         try:
             storefront_prices = await market_api.fetch_storefront_prices(
                 self._settings.market_business_id,
                 self._settings.market_api_token,
             )
+            report = market_api.PricesReport(storefront=storefront_prices)
         except Exception as exc:
             logger.error("Storefront report failed: %s", exc)
             result.errors.append(f"Отчёт витрины недоступен: {exc}")
@@ -473,10 +475,8 @@ class PricingAgent:
                 for pid_str, price in pdata.items():
                     if price and pid_str in product_by_id:
                         current_promos[product_by_id[pid_str].market_sku] = price
-            await self._save_price_history(products, storefront_prices, current_promos)
-            await self._update_storefront_prices(
-                products, market_api.PricesReport(storefront=storefront_prices)
-            )
+            await self._save_price_history(products, report, current_promos)
+            await self._update_storefront_prices(products, report)
         except Exception as exc:
             logger.error("Price history save failed: %s", exc)
 
