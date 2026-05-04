@@ -1,5 +1,8 @@
+import logging
+
 import httpx
 
+logger = logging.getLogger(__name__)
 _BASE = "https://api.partner.market.yandex.ru"
 
 
@@ -9,9 +12,14 @@ async def set_order_ready(market_order_id: str, campaign_id: int, token: str) ->
         response = await client.put(
             url,
             headers={"Authorization": f"Bearer {token}"},
-            json={"order": {"status": "READY_TO_SHIP"}},
+            json={"order": {"status": "PROCESSING", "substatus": "READY_TO_SHIP"}},
             timeout=30.0,
         )
+        if not response.is_success:
+            logger.error(
+                "set_order_ready HTTP %s order=%s body=%s",
+                response.status_code, market_order_id, response.text[:500],
+            )
         response.raise_for_status()
 
 
@@ -25,7 +33,13 @@ async def get_order_status(market_order_id: str, campaign_id: int, token: str) -
         )
         response.raise_for_status()
         data = response.json()
-    return data["order"]["status"]
+    order = data["order"]
+    status = order.get("status", "")
+    substatus = order.get("substatus", "")
+    # FBS: READY_TO_SHIP is a substatus of PROCESSING, not a top-level status
+    if status == "PROCESSING" and substatus == "READY_TO_SHIP":
+        return "READY_TO_SHIP"
+    return status
 
 
 async def get_order_items(market_order_id: str, campaign_id: int, token: str) -> list[dict]:
