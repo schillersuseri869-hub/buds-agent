@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.agents.pricing_agent import market_api
+from app.agents.pricing_agent.market_api import PricesReport
 from app.agents.pricing_agent.price_engine import (
     compute_catalog_update,
     evaluate_storefront,
@@ -80,7 +81,7 @@ class PricingAgent:
     async def _save_price_history(
         self,
         products: list[MarketProduct],
-        storefront_prices: dict[str, Decimal],
+        report: PricesReport,
         promo_prices: dict[str, Decimal],
     ) -> None:
         async with self._db_factory() as db:
@@ -88,7 +89,7 @@ class PricingAgent:
                 db.add(PriceHistory(
                     product_id=prod.id,
                     catalog_price=prod.catalog_price,
-                    storefront_price=storefront_prices.get(prod.market_sku),
+                    storefront_price=report.storefront.get(prod.market_sku),
                     min_price=prod.min_price,
                     optimal_price=prod.optimal_price,
                     promo_price=promo_prices.get(prod.market_sku),
@@ -109,17 +110,21 @@ class PricingAgent:
     async def _phase_catalog_sync(
         self,
         products: list[MarketProduct],
+        report: PricesReport,
         result: CycleResult,
     ) -> None:
         safe_updates: list[dict] = []
 
         for prod in products:
+            market_catalog = report.catalog.get(prod.market_sku)
+            if market_catalog is None:
+                market_catalog = prod.catalog_price
             update = compute_catalog_update(
                 sku=prod.market_sku,
                 db_catalog=prod.catalog_price,
                 db_crossed=prod.crossed_price,
                 db_optimal=prod.optimal_price,
-                market_catalog=prod.catalog_price,
+                market_catalog=market_catalog,
             )
             if update is None:
                 continue
@@ -150,7 +155,7 @@ class PricingAgent:
     async def _phase_storefront(
         self,
         products: list[MarketProduct],
-        storefront_prices: dict[str, Decimal],
+        report: PricesReport,
         promo_cache: dict[str, dict[str, Decimal]],
         result: CycleResult,
     ) -> None:
@@ -163,7 +168,7 @@ class PricingAgent:
         promo_updates: list[tuple[str, str, Decimal]] = []  # (promo_id, sku, new_price)
 
         for prod in products:
-            storefront = storefront_prices.get(prod.market_sku)
+            storefront = report.storefront.get(prod.market_sku)
             if storefront is None:
                 continue
             current_promo = current_promos.get(str(prod.id))
@@ -383,17 +388,17 @@ class PricingAgent:
 
         promo_cache = await self._load_promo_cache()
 
-        # Phase 1: Fetch storefront prices (async report)
-        storefront_prices: dict[str, Decimal] = {}
+        # Phase 1: Fetch prices report (catalog + storefront)
+        report = PricesReport()
         try:
-            storefront_prices = await market_api.fetch_storefront_prices(
+            report = await market_api.fetch_prices_report(
                 self._settings.market_business_id,
                 self._settings.market_api_token,
             )
         except Exception as exc:
-            logger.error("Storefront report failed: %s", exc)
-            result.errors.append(f"Отчёт витрины недоступен: {exc}")
-            await self._alert(f"⚠️ Отчёт витрины недоступен — мониторинг пропущен\n{exc}")
+            logger.error("Prices report failed: %s", exc)
+            result.errors.append(f"Отчёт цен недоступен: {exc}")
+            await self._alert(f"⚠️ Отчёт цен недоступен — фазы 2 и 3 пропущены\n{exc}")
 
         # Phase 1b: Fetch available promos
         available_promos: list[dict] = []
@@ -406,17 +411,18 @@ class PricingAgent:
             logger.error("get_promos failed: %s", exc)
             result.errors.append(f"Список акций недоступен: {exc}")
 
-        # Phase 2: Catalog sync
-        try:
-            await self._phase_catalog_sync(products, result)
-        except Exception as exc:
-            logger.error("_phase_catalog_sync crashed: %s", exc)
-            result.errors.append(f"Фаза 2 упала: {exc}")
+        # Phase 2: Catalog sync (only if report succeeded)
+        if report.catalog:
+            try:
+                await self._phase_catalog_sync(products, report, result)
+            except Exception as exc:
+                logger.error("_phase_catalog_sync crashed: %s", exc)
+                result.errors.append(f"Фаза 2 упала: {exc}")
 
         # Phase 3: Storefront monitoring (only if report succeeded)
-        if storefront_prices:
+        if report.storefront:
             try:
-                await self._phase_storefront(products, storefront_prices, promo_cache, result)
+                await self._phase_storefront(products, report, promo_cache, result)
             except Exception as exc:
                 logger.error("_phase_storefront crashed: %s", exc)
                 result.errors.append(f"Фаза 3 упала: {exc}")
@@ -436,7 +442,7 @@ class PricingAgent:
                 for pid_str, price in pdata.items():
                     if price and pid_str in product_by_id:
                         current_promos[product_by_id[pid_str].market_sku] = price
-            await self._save_price_history(products, storefront_prices, current_promos)
+            await self._save_price_history(products, report, current_promos)
         except Exception as exc:
             logger.error("Price history save failed: %s", exc)
 

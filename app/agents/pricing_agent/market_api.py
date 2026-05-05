@@ -2,6 +2,8 @@ import asyncio
 import csv
 import io
 import logging
+import zipfile
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
 import httpx
@@ -21,12 +23,19 @@ class ReportTimeoutError(Exception):
     pass
 
 
+@dataclass
+class PricesReport:
+    storefront: dict[str, Decimal] = field(default_factory=dict)
+    catalog: dict[str, Decimal] = field(default_factory=dict)
+    crossed: dict[str, Decimal] = field(default_factory=dict)
+
+
 def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
 async def generate_prices_report(business_id: int, token: str) -> str:
-    url = f"{_BASE}/v2/reports/goods-prices/generate"
+    url = f"{_BASE}/v2/reports/goods-prices/generate?format=CSV"
     payload = {"businessId": business_id}
     async with httpx.AsyncClient() as client:
         response = await client.post(
@@ -44,33 +53,67 @@ async def get_report_status(report_id: str, token: str) -> dict:
         return response.json()["result"]
 
 
-async def download_and_parse_report(file_url: str, token: str) -> dict[str, Decimal]:
-    """Download TSV/CSV report and return {market_sku: storefront_price}."""
+def _parse_decimal(raw: str) -> Decimal | None:
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        return Decimal(raw.replace(",", "."))
+    except InvalidOperation:
+        return None
+
+
+async def download_and_parse_report(file_url: str, token: str) -> PricesReport:
+    """Download ZIP(CSV) report and return PricesReport with storefront, catalog, crossed prices."""
     async with httpx.AsyncClient() as client:
         response = await client.get(file_url, headers=_headers(token), timeout=60.0)
         response.raise_for_status()
-        text = response.text
+        content = response.content
 
-    prices: dict[str, Decimal] = {}
-    reader = csv.DictReader(io.StringIO(text, newline=""), delimiter="\t")
-    for row in reader:
-        sku = (row.get("offerId") or row.get("sku") or "").strip()
-        raw_price = (row.get("storefrontPrice") or row.get("price") or "").strip()
-        if not sku or not raw_price:
-            continue
+    result = PricesReport()
+
+    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+        csv_name = next((n for n in zf.namelist() if n.endswith(".csv")), None)
+        if csv_name is None:
+            logger.error("No CSV file found in prices report ZIP: %s", zf.namelist())
+            return result
+        raw = zf.read(csv_name)
+
+    for enc in ("utf-8-sig", "utf-8", "cp1251"):
         try:
-            prices[sku] = Decimal(raw_price.replace(",", "."))
-        except InvalidOperation:
-            logger.warning("Cannot parse storefront price for %s: %r", sku, raw_price)
-    return prices
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        logger.error("Cannot decode prices report CSV")
+        return result
+
+    reader = csv.DictReader(io.StringIO(text, newline=""))
+    for row in reader:
+        sku = row.get("OFFER_ID", "").strip()
+        if not sku:
+            continue
+        if (v := _parse_decimal(row.get("ON_DISPLAY", ""))) is not None:
+            result.storefront[sku] = v
+        if (v := _parse_decimal(row.get("BASIC_PRICE", ""))) is not None:
+            result.catalog[sku] = v
+        if (v := _parse_decimal(row.get("BASIC_DISCOUNT_BASE", ""))) is not None:
+            result.crossed[sku] = v
+
+    logger.info(
+        "Prices report parsed: storefront=%d catalog=%d crossed=%d SKUs",
+        len(result.storefront), len(result.catalog), len(result.crossed),
+    )
+    return result
 
 
-async def fetch_storefront_prices(
+async def fetch_prices_report(
     business_id: int,
     token: str,
     max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
     poll_interval: int = _DEFAULT_POLL_INTERVAL,
-) -> dict[str, Decimal]:
+) -> PricesReport:
     report_id = await generate_prices_report(business_id, token)
     for _ in range(max_attempts):
         await asyncio.sleep(poll_interval)
