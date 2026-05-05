@@ -180,3 +180,47 @@ async def test_promo_participation_create(db_session):
     await db_session.commit()
     await db_session.refresh(pp)
     assert pp.promo_id == "promo-abc-123"
+
+
+@pytest.mark.asyncio
+async def test_promo_create(db_session):
+    from datetime import datetime, timezone
+    from app.models.promo import Promo
+
+    promo = Promo(
+        promo_id="PROMO-XYZ-001",
+        name="Скидка мая",
+        type="DIRECT_DISCOUNT",
+        starts_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 5, 31, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 5, 4, tzinfo=timezone.utc),
+    )
+    db_session.add(promo)
+    await db_session.commit()
+    await db_session.refresh(promo)
+
+    assert promo.promo_id == "PROMO-XYZ-001"
+    assert promo.type == "DIRECT_DISCOUNT"
+    assert promo.ends_at.year == 2026
+
+
+@pytest.mark.asyncio
+async def test_market_product_storefront_price(db_session):
+    import uuid
+    from decimal import Decimal
+    from app.models.market_products import MarketProduct
+
+    prod = MarketProduct(
+        market_sku=f"SKU-SF-{uuid.uuid4().hex[:6]}",
+        name="Тест витрина",
+        catalog_price=Decimal("2000"),
+        crossed_price=Decimal("2800"),
+        min_price=Decimal("1000"),
+        optimal_price=Decimal("1500"),
+        storefront_price=Decimal("1800"),
+    )
+    db_session.add(prod)
+    await db_session.commit()
+    await db_session.refresh(prod)
+
+    assert prod.storefront_price == Decimal("1800")

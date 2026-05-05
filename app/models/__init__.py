@@ -9,6 +9,7 @@ from app.models.print_jobs import PrintJob
 from app.models.price_history import PriceHistory
 from app.models.price_alerts import PriceAlert
 from app.models.promo_participations import PromoParticipation
+from app.models.promo import Promo
 from app.models.economics_reports import EconomicsReport
 from app.models.shop_schedule import ShopSchedule
 from app.models.events_log import EventLog
@@ -16,6 +17,6 @@ from app.models.events_log import EventLog
 __all__ = [
     "Base", "RawMaterial", "MarketProduct", "Recipe", "Florist",
     "Order", "OrderItem", "StockMovement", "PrintJob",
-    "PriceHistory", "PriceAlert", "PromoParticipation",
+    "PriceHistory", "PriceAlert", "PromoParticipation", "Promo",
     "EconomicsReport", "ShopSchedule", "EventLog",
 ]

@@ -1,5 +1,6 @@
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
@@ -20,8 +21,21 @@ from app.models.market_products import MarketProduct
 from app.models.price_history import PriceHistory
 from app.models.price_alerts import PriceAlert
 from app.models.promo_participations import PromoParticipation
+from app.models.promo import Promo
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_dt(value: str | None):
+    if value is None:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except (ValueError, AttributeError):
+        return None
 
 
 @dataclass
@@ -78,6 +92,19 @@ class PricingAgent:
                 cache.setdefault(pp.promo_id, {})[str(pp.product_id)] = pp.promo_price
         return cache
 
+    async def _sync_promos(self, available_promos: list[dict]) -> None:
+        async with self._db_factory() as db:
+            for promo in available_promos:
+                db.merge(Promo(
+                    promo_id=promo.get("id") or promo.get("promoId"),
+                    name=promo.get("name", ""),
+                    type=promo.get("mechanicsType", ""),
+                    starts_at=_parse_dt(promo.get("startDate")),
+                    ends_at=_parse_dt(promo.get("endDate")),
+                    updated_at=datetime.now(timezone.utc),
+                ))
+            await db.commit()
+
     async def _save_price_history(
         self,
         products: list[MarketProduct],
@@ -94,6 +121,17 @@ class PricingAgent:
                     optimal_price=prod.optimal_price,
                     promo_price=promo_prices.get(prod.market_sku),
                 ))
+            await db.commit()
+
+    async def _update_storefront_prices(
+        self, products: list[MarketProduct], storefront_prices: dict[str, Decimal]
+    ) -> None:
+        async with self._db_factory() as db:
+            for prod in products:
+                price = storefront_prices.get(prod.market_sku)
+                if price is not None:
+                    prod.storefront_price = price
+                    db.add(prod)
             await db.commit()
 
     async def _save_alert(self, product_id, alert_type: str, message: str) -> None:
@@ -269,7 +307,6 @@ class PricingAgent:
                     reason = rej.get("reason", "")
                     result.alerts.append(f"{sku}: Яндекс отклонил участие в акции ({reason})")
 
-                from datetime import datetime, timezone
                 now = datetime.now(timezone.utc)
                 async with self._db_factory() as db:
                     for offer in offers_to_add:
@@ -407,6 +444,7 @@ class PricingAgent:
                 self._settings.market_business_id,
                 self._settings.market_api_token,
             )
+            await self._sync_promos(available_promos)
         except Exception as exc:
             logger.error("get_promos failed: %s", exc)
             result.errors.append(f"Список акций недоступен: {exc}")
@@ -434,7 +472,7 @@ class PricingAgent:
             logger.error("_phase_promo_management crashed: %s", exc)
             result.errors.append(f"Фаза 4 упала: {exc}")
 
-        # Phase 5: Save history
+        # Phase 5: Save history + storefront prices
         try:
             product_by_id = {str(p.id): p for p in products}
             current_promos: dict[str, Decimal] = {}
@@ -443,6 +481,7 @@ class PricingAgent:
                     if price and pid_str in product_by_id:
                         current_promos[product_by_id[pid_str].market_sku] = price
             await self._save_price_history(products, report, current_promos)
+            await self._update_storefront_prices(products, report.storefront)
         except Exception as exc:
             logger.error("Price history save failed: %s", exc)
 
