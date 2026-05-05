@@ -5,7 +5,8 @@ from decimal import Decimal
 from typing import Optional
 
 from aiogram import Bot
-from sqlalchemy import select
+import httpx
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.agents.pricing_agent import market_api
@@ -133,6 +134,59 @@ class PricingAgent:
                     prod.storefront_price = price
                     db.add(prod)
             await db.commit()
+
+    async def _sync_pricing_grist(self) -> None:
+        grist_url = self._settings.grist_url.rstrip("/")
+        doc_id = self._settings.grist_doc_id
+        api_key = self._settings.grist_api_key
+        if not doc_id or not api_key:
+            logger.debug("Grist not configured — skipping PricingReport sync")
+            return
+
+        async with self._db_factory() as db:
+            result = await db.execute(text("SELECT * FROM v_pricing_report"))
+            rows = result.mappings().all()
+
+        def _num(v):
+            return float(v) if v is not None else None
+
+        def _str(v):
+            return str(v) if v is not None else ""
+
+        base = f"{grist_url}/api/docs/{doc_id}/tables/PricingReport"
+        headers = {"Authorization": f"Bearer {api_key}"}
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(f"{base}/records", headers=headers)
+            r.raise_for_status()
+            existing_ids = [rec["id"] for rec in r.json().get("records", [])]
+
+            if existing_ids:
+                r = await client.post(f"{base}/data/delete", headers=headers, json=existing_ids)
+                r.raise_for_status()
+
+            if rows:
+                records = [
+                    {"fields": {
+                        "name": _str(row["name"]),
+                        "market_sku": _str(row["market_sku"]),
+                        "catalog_price": _num(row["catalog_price"]),
+                        "min_promo_price": _num(row["min_promo_price"]),
+                        "storefront_price": _num(row["storefront_price"]),
+                        "optimal_price": _num(row["optimal_price"]),
+                        "promo_price": _num(row["promo_price"]),
+                        "discount_pct": _num(row["discount_pct"]),
+                        "promo_name": _str(row["promo_name"]),
+                        "promo_type": _str(row["promo_type"]),
+                        "ends_at": _str(row["ends_at"]),
+                        "status": _str(row["status"]),
+                    }}
+                    for row in rows
+                ]
+                r = await client.post(f"{base}/records", headers=headers, json={"records": records})
+                r.raise_for_status()
+
+        logger.info("Grist PricingReport synced: %d rows", len(rows))
 
     async def _save_alert(self, product_id, alert_type: str, message: str) -> None:
         async with self._db_factory() as db:
@@ -487,6 +541,13 @@ class PricingAgent:
 
         # Phase 6: Summary
         await self._send_summary(result)
+
+        # Phase 7: Sync to Grist
+        try:
+            await self._sync_pricing_grist()
+        except Exception as exc:
+            logger.error("Grist PricingReport sync failed: %s", exc)
+
         logger.info(
             "PricingAgent cycle done: synced=%d adjusted=%d alerts=%d errors=%d",
             result.catalog_synced, result.promo_adjusted,
