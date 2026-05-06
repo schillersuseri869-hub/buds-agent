@@ -83,6 +83,7 @@ async def load_materials(db: AsyncSession, rows: list[dict]) -> dict[str, RawMat
         else:
             mat.type = type_
             mat.unit = unit
+            mat.physical_stock = physical_stock
             mat.cost_per_unit = cost_per_unit
             mat.grist_row_id = grist_row_id
             mat.min_stock = min_stock

@@ -63,7 +63,12 @@ async def get_order_data(
         {
             "sku": item.get("offerId", ""),
             "count": item.get("count", 1),
-            "price": item.get("prices", {}).get("buyerPrice", 0),
+            "price": (
+                item.get("buyerPrice")
+                or item.get("price")
+                or (item.get("prices") or {}).get("buyerPrice")
+                or 0
+            ),
         }
         for item in order.get("items", [])
     ]
