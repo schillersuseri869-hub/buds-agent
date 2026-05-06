@@ -409,6 +409,7 @@ class OrderAgent:
             except Exception as exc:
                 logger.error("debit_materials failed for %s: %s", order_id_str, exc)
         elif channel == "order.cancelled":
+            await self._notify_all(f"❌ Заказ #{market_order_id} отменён")
             try:
                 async with self._db_factory() as db:
                     await stock_ops.release_materials(db, order_uuid)
