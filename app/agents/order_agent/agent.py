@@ -284,11 +284,14 @@ class OrderAgent:
                 async with self._db_factory() as db:
                     result = await db.execute(select(MarketProduct))
                     names = {p.market_sku: p.name for p in result.scalars().all()}
-                lines = [
-                    f"{it['sku']} × {it['count']} — {names.get(it['sku'], '?')}"
-                    for it in items
-                ]
-                items_lines = "\n" + "\n".join(lines) + "\n"
+                name_lines = "\n".join(
+                    f"{names.get(it['sku'], '?')} × {it['count']}" for it in items
+                )
+                sku_lines = "\n".join(
+                    f"{it['sku']} × {it['count']}" for it in items
+                )
+                total = sum(it["price"] * it["count"] for it in items)
+                items_lines = (name_lines, sku_lines, total)
         except Exception as exc:
             logger.warning("Could not fetch order data for notification: %s", exc)
 
@@ -303,9 +306,20 @@ class OrderAgent:
 
         _MSK = timezone(timedelta(hours=3))
         deadline_str = deadline.astimezone(_MSK).strftime("%-d.%m.%Y · %H:%M")
-        await self._notify_all(
-            f"🌸 Новый заказ!{items_lines}\n#{market_order_id}\n⏱ Обработать до: {deadline_str}"
-        )
+        if isinstance(items_lines, tuple):
+            name_lines, sku_lines, total = items_lines
+            total_str = f"{total:,.0f}".replace(",", " ")
+            msg = (
+                f"🌸 Новый заказ!\n"
+                f"{name_lines}\n"
+                f"⏱ {deadline_str}\n"
+                f"💰 {total_str} ₽\n"
+                f"{sku_lines}\n"
+                f"#{market_order_id}"
+            )
+        else:
+            msg = f"🌸 Новый заказ!\n⏱ {deadline_str}\n#{market_order_id}"
+        await self._notify_all(msg)
         self._schedule_timers(order_id_str, market_order_id, deadline)
 
         if items:
