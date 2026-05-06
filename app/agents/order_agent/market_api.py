@@ -53,11 +53,13 @@ async def get_order_items(market_order_id: str, campaign_id: int, token: str) ->
         )
         response.raise_for_status()
         data = response.json()
+    order = data.get("order", {})
+    logger.info("order delivery object for %s: %s", market_order_id, order.get("delivery"))
     return [
         {
             "sku": item.get("offerId", ""),
             "count": item.get("count", 1),
             "price": item.get("prices", {}).get("buyerPrice", 0),
         }
-        for item in data.get("order", {}).get("items", [])
+        for item in order.get("items", [])
     ]

@@ -112,7 +112,7 @@ class OrderAgent:
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(
-                text="✅ Готов сейчас",
+                text="✅ Заказ готов",
                 callback_data=f"ready_now:{order_id}",
             ),
             InlineKeyboardButton(
@@ -212,13 +212,25 @@ class OrderAgent:
             "order_id": order_id,
             "market_order_id": market_order_id,
         })
-        await self._alert(f"⚠️ Просрочка заказа #{market_order_id}! Зайдите в Маркет вручную.")
-        try:
-            async with self._db_factory() as db:
-                await stock_ops.release_materials(db, uuid.UUID(order_id))
-            await self._update_storefront()
-        except Exception as exc:
-            logger.error("release_materials(timeout) failed for %s: %s", order_id, exc)
+
+        await self._clear_button_messages(order_id)
+        await self._redis.delete(f"order:buttons:pressed:{order_id}")
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text="✅ Заказ готов",
+                callback_data=f"ready_now:{order_id}",
+            ),
+        ]])
+        messages = await self._notify_all(
+            f"⚠️ Время для сборки заказа #{market_order_id} истекло! Нажмите когда заказ будет готов:",
+            keyboard=keyboard,
+        )
+        redis_data = json.dumps({
+            "messages": [list(m) for m in messages],
+            "market_order_id": market_order_id,
+        })
+        await self._redis.setex(f"order:buttons:{order_id}", _REDIS_BTN_TTL, redis_data)
 
     def _schedule_timers(self, order_id: str, market_order_id: str, deadline: datetime) -> None:
         now = datetime.now(timezone.utc)
@@ -353,10 +365,18 @@ class OrderAgent:
             logger.error("Invalid order_id UUID: %s", order_id_str)
             return
 
+        market_order_id = data.get("market_order_id", "")
+
         async with self._db_factory() as db:
             result = await db.execute(select(Order).where(Order.id == order_uuid))
             order = result.scalar_one_or_none()
-            if order and order.status == "waiting":
+            if order is None:
+                return
+            if not market_order_id:
+                market_order_id = order.market_order_id
+            # order.ready допускает переход из waiting и timed_out (флорист нажал кнопку после просрочки)
+            allowed_from = {"waiting", "timed_out"} if channel == "order.ready" else {"waiting"}
+            if order.status in allowed_from:
                 order.status = new_status
                 await db.commit()
 
@@ -383,6 +403,10 @@ class OrderAgent:
                 await self._update_storefront()
             except Exception as exc:
                 logger.error("release_materials failed for %s: %s", order_id_str, exc)
+        elif channel == "order.shipped":
+            await self._notify_all(f"🚗 Заказ #{market_order_id} передан курьеру — в доставке")
+        elif channel == "order.delivered":
+            await self._notify_all(f"✅ Заказ #{market_order_id} доставлен")
 
     async def recover_timers(self) -> None:
         now = datetime.now(timezone.utc)
@@ -405,15 +429,22 @@ class OrderAgent:
                     "order_id": order_id,
                     "market_order_id": order.market_order_id,
                 })
-                await self._alert(
-                    f"⚠️ Просрочка при восстановлении: заказ #{order.market_order_id}"
+                await self._redis.delete(f"order:buttons:pressed:{order_id}")
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(
+                        text="✅ Заказ готов",
+                        callback_data=f"ready_now:{order_id}",
+                    ),
+                ]])
+                messages = await self._notify_all(
+                    f"⚠️ Время для сборки заказа #{order.market_order_id} истекло! Нажмите когда заказ будет готов:",
+                    keyboard=keyboard,
                 )
-                try:
-                    async with self._db_factory() as db:
-                        await stock_ops.release_materials(db, order.id)
-                    await self._update_storefront()
-                except Exception as exc:
-                    logger.error("release_materials(recover) failed for %s: %s", order_id, exc)
+                redis_data = json.dumps({
+                    "messages": [list(m) for m in messages],
+                    "market_order_id": order.market_order_id,
+                })
+                await self._redis.setex(f"order:buttons:{order_id}", _REDIS_BTN_TTL, redis_data)
             else:
                 self._schedule_timers(order_id, order.market_order_id, order.timer_deadline)
 
@@ -439,7 +470,7 @@ class OrderAgent:
 
         if action == "ready_now":
             self.cancel_timers(order_id)
-            action_text = "Готов сейчас"
+            action_text = "Заказ готов"
             try:
                 await market_api.set_order_ready(
                     market_order_id,
@@ -458,7 +489,7 @@ class OrderAgent:
                     f" Зайдите в Маркет вручную."
                 )
         else:
-            action_text = "Авто через 5 мин"
+            action_text = "Принято"
 
         for entry in messages:
             chat_id, message_id, bot_type = entry
