@@ -143,6 +143,10 @@ class OrderAgent:
         if order is None or order.status != "waiting":
             return
 
+        pressed = await self._redis.get(f"order:buttons:pressed:{order_id}")
+        if pressed != b"auto_5min":
+            return
+
         success = False
         for attempt in range(3):
             try:
@@ -453,7 +457,7 @@ class OrderAgent:
         action, order_id = data.split(":", 1)
 
         pressed_key = f"order:buttons:pressed:{order_id}"
-        was_first = await self._redis.set(pressed_key, "1", nx=True, ex=_REDIS_BTN_TTL)
+        was_first = await self._redis.set(pressed_key, action, nx=True, ex=_REDIS_BTN_TTL)
         if not was_first:
             await callback.answer("Уже принято другим пользователем")
             return
