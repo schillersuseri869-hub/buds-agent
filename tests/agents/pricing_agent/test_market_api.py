@@ -127,4 +127,35 @@ async def test_update_catalog_prices_sends_batch():
     call_kwargs = MockClient.return_value.post.call_args
     payload = call_kwargs.kwargs.get("json") or call_kwargs.args[1]
     assert len(payload["offers"]) == 1
-    assert payload["offers"][0]["id"] == "SKU-001"
+    offer = payload["offers"][0]
+    assert offer["id"] == "SKU-001"
+    assert offer["price"]["discountBase"] == 2100.0
+    assert offer["minimumForBestseller"]["value"] == 1000.0
+
+
+@pytest.mark.asyncio
+async def test_update_catalog_prices_omits_invalid_discount_base():
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json.return_value = {"status": "OK"}
+
+    updates = [
+        {"sku": "SKU-002", "value": Decimal("1500"), "discount_base": Decimal("0"),
+         "minimum_for_bestseller": Decimal("1000")},
+        {"sku": "SKU-003", "value": Decimal("1500"), "discount_base": Decimal("1200"),
+         "minimum_for_bestseller": Decimal("0")},
+    ]
+
+    with patch("httpx.AsyncClient") as MockClient:
+        MockClient.return_value.__aenter__ = AsyncMock(return_value=MockClient.return_value)
+        MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+        MockClient.return_value.post = AsyncMock(return_value=mock_response)
+        await update_catalog_prices(_BIZ_ID, _TOKEN, updates)
+
+    payload = MockClient.return_value.post.call_args.kwargs.get("json")
+    # SKU-002: discount_base=0 → no discountBase; min_bs=1000 → included
+    assert "discountBase" not in payload["offers"][0]["price"]
+    assert "minimumForBestseller" in payload["offers"][0]
+    # SKU-003: discount_base=1200 < value=1500 → no discountBase; min_bs=0 → omitted
+    assert "discountBase" not in payload["offers"][1]["price"]
+    assert "minimumForBestseller" not in payload["offers"][1]

@@ -163,23 +163,21 @@ async def update_catalog_prices(
     """
     if not updates:
         return
-    payload = {
-        "offers": [
-            {
-                "id": u["sku"],
-                "price": {
-                    "value": float(u["value"]),
-                    "currencyId": "RUR",
-                    "discountBase": float(u["discount_base"]),
-                },
-                "minimumForBestseller": {
-                    "value": float(u["minimum_for_bestseller"]),
-                    "currencyId": "RUR",
-                },
-            }
-            for u in updates
-        ]
-    }
+    def _build_offer(u: dict) -> dict:
+        value = float(u["value"])
+        discount_base = u.get("discount_base") or 0
+        min_bs = u.get("minimum_for_bestseller") or 0
+
+        price: dict = {"value": value, "currencyId": "RUR"}
+        if discount_base and float(discount_base) > value:
+            price["discountBase"] = float(discount_base)
+
+        offer: dict = {"id": u["sku"], "price": price}
+        if min_bs and float(min_bs) > 0:
+            offer["minimumForBestseller"] = {"value": float(min_bs), "currencyId": "RUR"}
+        return offer
+
+    payload = {"offers": [_build_offer(u) for u in updates]}
     url = f"{_BASE}/v2/businesses/{business_id}/offer-prices/updates"
     async with httpx.AsyncClient() as client:
         response = await client.post(
