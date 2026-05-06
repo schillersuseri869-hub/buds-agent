@@ -123,7 +123,7 @@ async def push_stock_movement_to_grist(
     payload = {
         "records": [{
             "fields": {
-                "date": ["d", now_ts],
+                "date": now_ts,
                 "material": material_name,
                 "type": movement_type,
                 "quantity": float(quantity),
