@@ -67,7 +67,7 @@ def register_eucalyptus_callbacks(flower_stock_agent) -> None:
 
 
 def register_sync_handler(flower_stock_agent, db_factory) -> None:
-    from app.agents.flower_stock.sheets_loader import load_from_grist
+    from app.agents.flower_stock.sheets_loader import load_from_grist, push_materials_status_to_grist
 
     @owner_router.message(Command("sync"))
     async def cmd_sync(message: Message):
@@ -81,6 +81,10 @@ def register_sync_handler(flower_stock_agent, db_factory) -> None:
                     settings.grist_api_key,
                 )
             await flower_stock_agent._update_storefront()
+            async with db_factory() as db:
+                await push_materials_status_to_grist(
+                    settings.grist_url, settings.grist_doc_id, settings.grist_api_key, db
+                )
             await message.answer(f"✅ Grist синхронизирован: {n_mat} материалов, {n_prod} товаров.")
         except Exception as exc:
             await message.answer(f"❌ Ошибка синхронизации: {exc}")
