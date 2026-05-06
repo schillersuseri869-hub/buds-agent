@@ -266,25 +266,20 @@ class OrderAgent:
             logger.error("Invalid order_id UUID: %s", order_id_str)
             return
 
-        deadline = datetime.now(timezone.utc) + timedelta(minutes=57)
-
-        async with self._db_factory() as db:
-            result = await db.execute(select(Order).where(Order.id == order_uuid))
-            order = result.scalar_one_or_none()
-            if order is None:
-                logger.error("Order not found in DB: %s", order_id_str)
-                return
-            order.timer_deadline = deadline
-            await db.commit()
-
+        # Получаем items и дедлайн отгрузки за один запрос к API
         items: list[dict] = []
         items_lines = ""
+        deadline = datetime.now(timezone.utc) + timedelta(minutes=57)  # fallback
         try:
-            items = await market_api.get_order_items(
+            items, shipment_deadline = await market_api.get_order_data(
                 market_order_id,
                 self._settings.market_campaign_id,
                 self._settings.market_api_token,
             )
+            if shipment_deadline is not None:
+                deadline = shipment_deadline
+            else:
+                logger.warning("No shipment deadline from API for order %s, using +57min fallback", market_order_id)
             if items:
                 async with self._db_factory() as db:
                     result = await db.execute(select(MarketProduct))
@@ -295,7 +290,16 @@ class OrderAgent:
                 ]
                 items_lines = "\n" + "\n".join(lines) + "\n"
         except Exception as exc:
-            logger.warning("Could not fetch order items for notification: %s", exc)
+            logger.warning("Could not fetch order data for notification: %s", exc)
+
+        async with self._db_factory() as db:
+            result = await db.execute(select(Order).where(Order.id == order_uuid))
+            order = result.scalar_one_or_none()
+            if order is None:
+                logger.error("Order not found in DB: %s", order_id_str)
+                return
+            order.timer_deadline = deadline
+            await db.commit()
 
         await self._notify_all(f"🌸 Новый заказ!{items_lines}\n#{market_order_id}")
         self._schedule_timers(order_id_str, market_order_id, deadline)

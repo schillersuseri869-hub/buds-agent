@@ -1,9 +1,11 @@
 import logging
+from datetime import datetime, timezone, timedelta
 
 import httpx
 
 logger = logging.getLogger(__name__)
 _BASE = "https://api.partner.market.yandex.ru"
+_MSK = timezone(timedelta(hours=3))
 
 
 async def set_order_ready(market_order_id: str, campaign_id: int, token: str) -> None:
@@ -42,8 +44,10 @@ async def get_order_status(market_order_id: str, campaign_id: int, token: str) -
     return status
 
 
-async def get_order_items(market_order_id: str, campaign_id: int, token: str) -> list[dict]:
-    """Return [{sku, name, count}] for the order."""
+async def get_order_data(
+    market_order_id: str, campaign_id: int, token: str
+) -> tuple[list[dict], datetime | None]:
+    """Return (items, shipment_deadline_utc) from a single API call."""
     url = f"{_BASE}/campaigns/{campaign_id}/orders/{market_order_id}"
     async with httpx.AsyncClient() as client:
         response = await client.get(
@@ -54,8 +58,8 @@ async def get_order_items(market_order_id: str, campaign_id: int, token: str) ->
         response.raise_for_status()
         data = response.json()
     order = data.get("order", {})
-    logger.info("order delivery object for %s: %s", market_order_id, order.get("delivery"))
-    return [
+
+    items = [
         {
             "sku": item.get("offerId", ""),
             "count": item.get("count", 1),
@@ -63,3 +67,18 @@ async def get_order_items(market_order_id: str, campaign_id: int, token: str) ->
         }
         for item in order.get("items", [])
     ]
+
+    deadline: datetime | None = None
+    try:
+        shipments = order.get("delivery", {}).get("shipments", [])
+        if shipments:
+            s = shipments[0]
+            date_str = s.get("shipmentDate", "")  # "DD-MM-YYYY"
+            time_str = s.get("shipmentTime", "")   # "HH:MM"
+            if date_str and time_str:
+                naive = datetime.strptime(f"{date_str} {time_str}", "%d-%m-%Y %H:%M")
+                deadline = naive.replace(tzinfo=_MSK).astimezone(timezone.utc)
+    except Exception as exc:
+        logger.warning("Failed to parse shipment deadline for order %s: %s", market_order_id, exc)
+
+    return items, deadline
