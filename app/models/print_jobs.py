@@ -14,7 +14,7 @@ class PrintJob(Base):
         ForeignKey("orders.id"), nullable=False, index=True
     )
     status: Mapped[str] = mapped_column(
-        Enum("pending", "sent", "done", "failed", name="print_job_status"),
+        Enum("pending", "sent", "done", "failed", "cancelled", name="print_job_status"),
         nullable=False,
         default="pending",
     )

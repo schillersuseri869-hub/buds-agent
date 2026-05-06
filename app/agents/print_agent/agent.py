@@ -19,7 +19,7 @@ from app.api.ws_print import send_print_job
 
 logger = logging.getLogger(__name__)
 
-_VALID_STATUSES = frozenset({"pending", "sent", "done", "failed"})
+_VALID_STATUSES = frozenset({"pending", "sent", "done", "failed", "cancelled"})
 
 
 async def _fetch_label_bytes(url: str, token: str) -> bytes:
@@ -67,6 +67,22 @@ async def get_pending_jobs(db: AsyncSession) -> list[PrintJob]:
         .order_by(PrintJob.created_at, PrintJob.id)
     )
     return list(result.scalars().all())
+
+
+async def cancel_pending_job(db: AsyncSession, order_id: uuid_module.UUID) -> PrintJob | None:
+    result = await db.execute(
+        select(PrintJob)
+        .where(PrintJob.order_id == order_id)
+        .where(PrintJob.status.in_(["pending", "sent"]))
+    )
+    job = result.scalar_one_or_none()
+    if job is None:
+        return None
+    job.status = "cancelled"
+    job.completed_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(job)
+    return job
 
 
 async def update_job_status(
@@ -143,6 +159,17 @@ class PrintAgent:
                 f"Принтер офлайн. Ярлык заказа #{market_order_id} "
                 f"будет напечатан при подключении."
             )
+
+    async def handle_order_cancelled(self, channel: str, data: dict) -> None:
+        order_id_str = data.get("order_id")
+        if not order_id_str:
+            return
+        try:
+            order_uuid = uuid_module.UUID(order_id_str)
+        except ValueError:
+            return
+        async with self._db_factory() as db:
+            await cancel_pending_job(db, order_uuid)
 
     async def flush_pending_jobs(self) -> None:
         async with self._db_factory() as db:

@@ -76,6 +76,7 @@ async def lifespan(app: FastAPI):
 
     print_agent = PrintAgent(redis, AsyncSessionLocal, owner_bot, settings)
     await event_bus.subscribe("order.created", print_agent.handle_order_created)
+    await event_bus.subscribe("order.cancelled", print_agent.handle_order_cancelled)
     set_callbacks(
         on_connect=print_agent.flush_pending_jobs,
         on_ack=print_agent.handle_ack,
