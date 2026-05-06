@@ -89,6 +89,7 @@ async def lifespan(app: FastAPI):
     await event_bus.subscribe("order.cancelled", order_agent.handle_order_status)
     await event_bus.subscribe("order.shipped", order_agent.handle_order_status)
     await event_bus.subscribe("order.delivered", order_agent.handle_order_status)
+    await event_bus.subscribe("order.returned", order_agent.handle_order_status)
     await order_agent.recover_timers()
 
     register_owner_callbacks(order_agent)

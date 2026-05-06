@@ -16,7 +16,7 @@ class Order(Base):
     )
     status: Mapped[str] = mapped_column(
         Enum(
-            "waiting", "ready", "shipped", "delivered", "cancelled", "timed_out",
+            "waiting", "ready", "shipped", "delivered", "cancelled", "timed_out", "returned",
             name="order_status",
         ),
         nullable=False,

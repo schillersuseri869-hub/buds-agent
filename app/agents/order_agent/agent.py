@@ -380,6 +380,7 @@ class OrderAgent:
             "order.cancelled": "cancelled",
             "order.shipped": "shipped",
             "order.delivered": "delivered",
+            "order.returned": "returned",
         }
         new_status = status_map.get(channel)
         if new_status is None:
@@ -400,8 +401,12 @@ class OrderAgent:
                 return
             if not market_order_id:
                 market_order_id = order.market_order_id
-            # order.ready допускает переход из waiting и timed_out (флорист нажал кнопку после просрочки)
-            allowed_from = {"waiting", "timed_out"} if channel == "order.ready" else {"waiting"}
+            if channel == "order.ready":
+                allowed_from = {"waiting", "timed_out"}
+            elif channel == "order.returned":
+                allowed_from = {"shipped", "delivered"}
+            else:
+                allowed_from = {"waiting", "timed_out", "ready", "shipped", "delivered"}
             if order.status in allowed_from:
                 order.status = new_status
                 await db.commit()
@@ -434,6 +439,8 @@ class OrderAgent:
             await self._notify_all(f"🚗 Заказ #{market_order_id} передан курьеру — в доставке")
         elif channel == "order.delivered":
             await self._notify_all(f"✅ Заказ #{market_order_id} доставлен")
+        elif channel == "order.returned":
+            await self._notify_all(f"↩️ Заказ #{market_order_id} — возврат")
 
     async def recover_timers(self) -> None:
         now = datetime.now(timezone.utc)

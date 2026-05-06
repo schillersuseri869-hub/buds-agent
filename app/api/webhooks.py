@@ -23,6 +23,7 @@ _STATUS_MAP = {
     "DELIVERY": ("order.shipped", "shipped"),
     "DELIVERED": ("order.delivered", "delivered"),
     "CANCELLED": ("order.cancelled", "cancelled"),
+    "RETURNED": ("order.returned", "returned"),
 }
 
 _PING_RESPONSE = {
