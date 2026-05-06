@@ -301,7 +301,11 @@ class OrderAgent:
             order.timer_deadline = deadline
             await db.commit()
 
-        await self._notify_all(f"🌸 Новый заказ!{items_lines}\n#{market_order_id}")
+        _MSK = timezone(timedelta(hours=3))
+        deadline_str = deadline.astimezone(_MSK).strftime("%-d.%m.%Y · %H:%M")
+        await self._notify_all(
+            f"🌸 Новый заказ!{items_lines}\n#{market_order_id}\n⏱ Обработать до: {deadline_str}"
+        )
         self._schedule_timers(order_id_str, market_order_id, deadline)
 
         if items:
