@@ -87,6 +87,8 @@ class FlowerStockAgent:
                 self._settings.grist_api_key,
                 material.grist_row_id,
                 material.physical_stock,
+                material.reserved,
+                material.min_buffer or Decimal("0"),
             )
         except Exception as exc:
             logger.error("sync_to_grist(%s) failed: %s", material.name, exc)

@@ -43,11 +43,18 @@ async def _fetch_table(base_url: str, doc_id: str, api_key: str, table: str) -> 
 
 
 async def push_material_to_grist(
-    base_url: str, doc_id: str, api_key: str, row_id: int, physical_stock: Decimal
+    base_url: str, doc_id: str, api_key: str, row_id: int,
+    physical_stock: Decimal, reserved: Decimal = Decimal("0"),
+    min_buffer: Decimal = Decimal("0"),
 ) -> None:
-    """PATCH a single Materials row in Grist with the new physical_stock value."""
+    """PATCH a single Materials row in Grist with stock values."""
+    available = float(max(Decimal("0"), physical_stock - reserved - min_buffer))
     url = f"{base_url}/api/docs/{doc_id}/tables/Materials/records"
-    payload = {"records": [{"id": row_id, "fields": {"physical_stock": float(physical_stock)}}]}
+    payload = {"records": [{"id": row_id, "fields": {
+        "physical_stock": float(physical_stock),
+        "reserved": float(reserved),
+        "available": available,
+    }}]}
     async with httpx.AsyncClient() as client:
         response = await client.patch(
             url,
@@ -61,56 +68,40 @@ async def push_material_to_grist(
 async def push_materials_status_to_grist(
     base_url: str, doc_id: str, api_key: str, db: "AsyncSession"
 ) -> None:
-    """Replace all rows in MaterialsStatus with current PG state."""
+    """Update reserved + available columns in Grist Materials table from PG state."""
     from sqlalchemy import select as _select
     from app.models.raw_materials import RawMaterial
 
-    result = await db.execute(_select(RawMaterial).order_by(RawMaterial.name))
+    result = await db.execute(
+        _select(RawMaterial).where(RawMaterial.grist_row_id.isnot(None))
+    )
     materials = list(result.scalars().all())
 
-    # Fetch existing row IDs to delete them
-    url_base = f"{base_url}/api/docs/{doc_id}/tables/MaterialsStatus"
+    records = [
+        {
+            "id": m.grist_row_id,
+            "fields": {
+                "reserved": float(m.reserved),
+                "available": float(max(
+                    Decimal("0"),
+                    m.physical_stock - m.reserved - (m.min_buffer or Decimal("0"))
+                )),
+            },
+        }
+        for m in materials
+    ]
+    if not records:
+        return
+
+    url = f"{base_url}/api/docs/{doc_id}/tables/Materials/records"
     async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{url_base}/records",
+        response = await client.patch(
+            url,
             headers={"Authorization": f"Bearer {api_key}"},
-            timeout=10.0,
+            json={"records": records},
+            timeout=15.0,
         )
-        resp.raise_for_status()
-        existing_ids = [r["id"] for r in resp.json().get("records", [])]
-
-        if existing_ids:
-            await client.request(
-                "DELETE",
-                f"{url_base}/records",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={"records": [{"id": i} for i in existing_ids]},
-                timeout=10.0,
-            )
-
-        records = [
-            {
-                "fields": {
-                    "name": m.name,
-                    "unit": m.unit,
-                    "physical_stock": float(m.physical_stock),
-                    "reserved": float(m.reserved),
-                    "available": float(max(
-                        Decimal("0"),
-                        m.physical_stock - m.reserved - (m.min_buffer or Decimal("0"))
-                    )),
-                    "min_stock": float(m.min_stock) if m.min_stock is not None else 0.0,
-                }
-            }
-            for m in materials
-        ]
-        if records:
-            await client.post(
-                f"{url_base}/records",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={"records": records},
-                timeout=10.0,
-            )
+        response.raise_for_status()
 
 
 async def push_stock_movement_to_grist(
@@ -319,6 +310,20 @@ async def load_from_grist(
     materials = await load_materials(db, mat_rows)
     products = await load_products(db, prod_rows)
     await load_recipes(db, recipe_rows, products, materials)
+
+    # Nullify grist_row_id for PG records no longer present in Grist
+    active_mat_names = set(materials.keys())
+    result = await db.execute(select(RawMaterial))
+    for mat in result.scalars().all():
+        if mat.name not in active_mat_names and mat.grist_row_id is not None:
+            mat.grist_row_id = None
+    active_sku = set(products.keys())
+    result = await db.execute(select(MarketProduct))
+    for prod in result.scalars().all():
+        if prod.market_sku not in active_sku and prod.grist_row_id is not None:
+            prod.grist_row_id = None
+    await db.commit()
+
     logger.info(
         "Grist load complete: %d materials, %d products",
         len(materials), len(products),
