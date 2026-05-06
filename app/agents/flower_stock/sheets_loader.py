@@ -76,6 +76,7 @@ async def push_materials_status_to_grist(
         _select(RawMaterial).where(RawMaterial.grist_row_id.isnot(None))
     )
     materials = list(result.scalars().all())
+    logger.info("push_materials_status: %d materials with grist_row_id", len(materials))
 
     records = [
         {
@@ -91,6 +92,7 @@ async def push_materials_status_to_grist(
         for m in materials
     ]
     if not records:
+        logger.error("push_materials_status: no records to push — grist_row_id missing in PG, run /sync")
         return
 
     url = f"{base_url}/api/docs/{doc_id}/tables/Materials/records"
@@ -101,6 +103,8 @@ async def push_materials_status_to_grist(
             json={"records": records},
             timeout=15.0,
         )
+        if not response.is_success:
+            logger.error("push_materials_status PATCH failed %d: %s", response.status_code, response.text[:300])
         response.raise_for_status()
 
 
@@ -370,7 +374,7 @@ async def push_debug_after_stock_op(
     try:
         await push_materials_status_to_grist(base_url, doc_id, api_key, db)
     except Exception as exc:
-        logger.warning("push_materials_status_to_grist failed: %s", exc)
+        logger.error("push_materials_status_to_grist failed: %s", exc)
     await push_order_movements_to_grist(
         base_url, doc_id, api_key, db, order_uuid, movement_type, market_order_id,
     )
