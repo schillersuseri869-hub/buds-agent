@@ -1,4 +1,5 @@
 import logging
+import uuid
 from decimal import Decimal, InvalidOperation
 
 import httpx
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.market_products import MarketProduct
 from app.models.raw_materials import RawMaterial
 from app.models.recipes import Recipe
+from app.models.stock_movements import StockMovement
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +50,95 @@ async def push_material_to_grist(
     payload = {"records": [{"id": row_id, "fields": {"physical_stock": float(physical_stock)}}]}
     async with httpx.AsyncClient() as client:
         response = await client.patch(
+            url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            json=payload,
+            timeout=10.0,
+        )
+        response.raise_for_status()
+
+
+async def push_materials_status_to_grist(
+    base_url: str, doc_id: str, api_key: str, db: "AsyncSession"
+) -> None:
+    """Replace all rows in MaterialsStatus with current PG state."""
+    from sqlalchemy import select as _select
+    from app.models.raw_materials import RawMaterial
+
+    result = await db.execute(_select(RawMaterial).order_by(RawMaterial.name))
+    materials = list(result.scalars().all())
+
+    # Fetch existing row IDs to delete them
+    url_base = f"{base_url}/api/docs/{doc_id}/tables/MaterialsStatus"
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{url_base}/records",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        existing_ids = [r["id"] for r in resp.json().get("records", [])]
+
+        if existing_ids:
+            await client.request(
+                "DELETE",
+                f"{url_base}/records",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"records": [{"id": i} for i in existing_ids]},
+                timeout=10.0,
+            )
+
+        records = [
+            {
+                "fields": {
+                    "name": m.name,
+                    "unit": m.unit,
+                    "physical_stock": float(m.physical_stock),
+                    "reserved": float(m.reserved),
+                    "available": float(max(
+                        Decimal("0"),
+                        m.physical_stock - m.reserved - (m.min_buffer or Decimal("0"))
+                    )),
+                    "min_stock": float(m.min_stock) if m.min_stock is not None else 0.0,
+                }
+            }
+            for m in materials
+        ]
+        if records:
+            await client.post(
+                f"{url_base}/records",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"records": records},
+                timeout=10.0,
+            )
+
+
+async def push_stock_movement_to_grist(
+    base_url: str,
+    doc_id: str,
+    api_key: str,
+    material_name: str,
+    movement_type: str,
+    quantity: Decimal,
+    order_id: str | None,
+) -> None:
+    """Append one row to StockMovements table."""
+    from datetime import datetime, timezone
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    payload = {
+        "records": [{
+            "fields": {
+                "date": ["d", now_ts],
+                "material": material_name,
+                "type": movement_type,
+                "quantity": float(quantity),
+                "order_id": order_id or "",
+            }
+        }]
+    }
+    url = f"{base_url}/api/docs/{doc_id}/tables/StockMovements/records"
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
             url,
             headers={"Authorization": f"Bearer {api_key}"},
             json=payload,
@@ -233,3 +324,48 @@ async def load_from_grist(
         len(materials), len(products),
     )
     return len(materials), len(products)
+
+
+async def push_order_movements_to_grist(
+    base_url: str,
+    doc_id: str,
+    api_key: str,
+    db: AsyncSession,
+    order_uuid: uuid.UUID,
+    movement_type: str,
+    market_order_id: str,
+) -> None:
+    """Push all movements of a given type for an order to Grist StockMovements."""
+    result = await db.execute(
+        select(StockMovement, RawMaterial)
+        .join(RawMaterial, StockMovement.material_id == RawMaterial.id)
+        .where(StockMovement.order_id == order_uuid, StockMovement.type == movement_type)
+    )
+    rows = result.all()
+    for movement, material in rows:
+        try:
+            await push_stock_movement_to_grist(
+                base_url, doc_id, api_key,
+                material.name, movement_type, movement.quantity, market_order_id,
+            )
+        except Exception as exc:
+            logger.warning("push_stock_movement_to_grist failed: %s", exc)
+
+
+async def push_debug_after_stock_op(
+    base_url: str,
+    doc_id: str,
+    api_key: str,
+    db: AsyncSession,
+    order_uuid: uuid.UUID,
+    movement_type: str,
+    market_order_id: str,
+) -> None:
+    """Push MaterialsStatus snapshot + order movements to Grist. Call after any stock operation."""
+    try:
+        await push_materials_status_to_grist(base_url, doc_id, api_key, db)
+    except Exception as exc:
+        logger.warning("push_materials_status_to_grist failed: %s", exc)
+    await push_order_movements_to_grist(
+        base_url, doc_id, api_key, db, order_uuid, movement_type, market_order_id,
+    )

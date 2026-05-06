@@ -16,6 +16,7 @@ from app.models.market_products import MarketProduct
 from app.agents.order_agent import market_api
 from app.agents.flower_stock import stock_ops
 from app.agents.flower_stock import market_api as stock_market_api
+from app.agents.flower_stock.sheets_loader import push_debug_after_stock_op
 
 logger = logging.getLogger(__name__)
 
@@ -329,6 +330,12 @@ class OrderAgent:
                 async with self._db_factory() as db:
                     await stock_ops.reserve_materials(db, order_uuid, items)
                 await self._update_storefront()
+                async with self._db_factory() as db:
+                    await push_debug_after_stock_op(
+                        self._settings.grist_url, self._settings.grist_doc_id,
+                        self._settings.grist_api_key, db,
+                        order_uuid, "reserve", market_order_id,
+                    )
                 has_e_items = any("-e" in item.get("sku", "") for item in items)
                 if has_e_items:
                     async with self._db_factory() as db:
@@ -425,6 +432,12 @@ class OrderAgent:
                         order2.estimated_cost = cost
                         await db.commit()
                 await self._update_storefront()
+                async with self._db_factory() as db:
+                    await push_debug_after_stock_op(
+                        self._settings.grist_url, self._settings.grist_doc_id,
+                        self._settings.grist_api_key, db,
+                        order_uuid, "debit", market_order_id,
+                    )
             except Exception as exc:
                 logger.error("debit_materials failed for %s: %s", order_id_str, exc)
         elif channel == "order.cancelled":
@@ -433,6 +446,12 @@ class OrderAgent:
                 async with self._db_factory() as db:
                     await stock_ops.release_materials(db, order_uuid)
                 await self._update_storefront()
+                async with self._db_factory() as db:
+                    await push_debug_after_stock_op(
+                        self._settings.grist_url, self._settings.grist_doc_id,
+                        self._settings.grist_api_key, db,
+                        order_uuid, "release", market_order_id,
+                    )
             except Exception as exc:
                 logger.error("release_materials failed for %s: %s", order_id_str, exc)
         elif channel == "order.shipped":
