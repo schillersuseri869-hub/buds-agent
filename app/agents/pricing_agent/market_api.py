@@ -172,7 +172,7 @@ async def update_catalog_prices(
         if discount_base and float(discount_base) > value:
             price["discountBase"] = float(discount_base)
 
-        offer: dict = {"id": u["sku"], "price": price}
+        offer: dict = {"offerId": u["sku"], "price": price}
         if min_bs and float(min_bs) > 0:
             offer["minimumForBestseller"] = {"value": float(min_bs), "currencyId": "RUR"}
         return offer

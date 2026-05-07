@@ -128,7 +128,7 @@ async def test_update_catalog_prices_sends_batch():
     payload = call_kwargs.kwargs.get("json") or call_kwargs.args[1]
     assert len(payload["offers"]) == 1
     offer = payload["offers"][0]
-    assert offer["id"] == "SKU-001"
+    assert offer["offerId"] == "SKU-001"
     assert offer["price"]["discountBase"] == 2100.0
     assert offer["minimumForBestseller"]["value"] == 1000.0
 
