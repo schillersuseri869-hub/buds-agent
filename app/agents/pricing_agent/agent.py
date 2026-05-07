@@ -156,20 +156,30 @@ class PricingAgent:
         base = f"{grist_url}/api/docs/{doc_id}/tables/PricingReport"
         headers = {"Authorization": f"Bearer {api_key}"}
 
+        # Grist column IDs (renamed when user set Cyrillic labels)
+        _COL = {
+            "name": "A", "catalog_price": "B", "min_promo_price": "C",
+            "storefront_price": "D", "discount_pct": "E",
+            "promo_name": "F", "promo_type": "G", "ends_at": "H", "status": "I",
+            # unchanged
+            "market_sku": "market_sku", "optimal_price": "optimal_price",
+            "promo_price": "promo_price",
+        }
+
         def _row_fields(row) -> dict:
             fields: dict = {
-                "name": _str(row["name"]),
-                "market_sku": _str(row["market_sku"]),
-                "promo_name": _str(row["promo_name"]),
-                "promo_type": _str(row["promo_type"]),
-                "ends_at": _str(row["ends_at"]),
-                "status": _str(row["status"]),
+                _COL["name"]: _str(row["name"]),
+                _COL["market_sku"]: _str(row["market_sku"]),
+                _COL["promo_name"]: _str(row["promo_name"]),
+                _COL["promo_type"]: _str(row["promo_type"]),
+                _COL["ends_at"]: _str(row["ends_at"]),
+                _COL["status"]: _str(row["status"]),
             }
-            for col in ("catalog_price", "min_promo_price", "storefront_price",
-                        "optimal_price", "promo_price", "discount_pct"):
-                v = _num(row[col])
+            for db_col in ("catalog_price", "min_promo_price", "storefront_price",
+                           "optimal_price", "promo_price", "discount_pct"):
+                v = _num(row[db_col])
                 if v is not None:
-                    fields[col] = v
+                    fields[_COL[db_col]] = v
             return fields
 
         async with httpx.AsyncClient(timeout=60) as client:
