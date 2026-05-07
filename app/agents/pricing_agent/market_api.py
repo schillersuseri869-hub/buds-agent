@@ -178,11 +178,14 @@ async def update_catalog_prices(
         return offer
 
     payload = {"offers": [_build_offer(u) for u in updates]}
+    logger.debug("update_catalog_prices payload: %s", payload)
     url = f"{_BASE}/v2/businesses/{business_id}/offer-prices/updates"
     async with httpx.AsyncClient() as client:
         response = await client.post(
             url, headers=_headers(token), json=payload, timeout=60.0
         )
+        if not response.is_success:
+            logger.error("update_catalog_prices %s: %s", response.status_code, response.text[:1000])
         response.raise_for_status()
 
 
