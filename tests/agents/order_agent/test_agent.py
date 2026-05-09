@@ -133,10 +133,13 @@ async def test_run_t50_skips_if_order_cancelled():
 
 @pytest.mark.asyncio
 async def test_run_t55_publishes_order_ready_on_confirmation():
+    redis = fakeredis.aioredis.FakeRedis()
     event_bus = AsyncMock()
     order_id = str(uuid.uuid4())
-    agent = make_agent(event_bus=event_bus)
+    agent = make_agent(redis=redis, event_bus=event_bus)
     agent._tasks[order_id] = []
+    # _run_t55 only proceeds when user pressed "auto_5min"
+    await redis.set(f"order:buttons:pressed:{order_id}", b"auto_5min", ex=7200)
 
     mock_db = AsyncMock()
     mock_order = MagicMock()
@@ -164,11 +167,13 @@ async def test_run_t55_publishes_order_ready_on_confirmation():
 
 @pytest.mark.asyncio
 async def test_run_t55_alerts_if_confirmation_fails():
+    redis = fakeredis.aioredis.FakeRedis()
     order_id = str(uuid.uuid4())
     owner_bot = AsyncMock()
     owner_bot.send_message = AsyncMock()
-    agent = make_agent(owner_bot=owner_bot)
+    agent = make_agent(redis=redis, owner_bot=owner_bot)
     agent._tasks[order_id] = []
+    await redis.set(f"order:buttons:pressed:{order_id}", b"auto_5min", ex=7200)
 
     mock_db = AsyncMock()
     mock_order = MagicMock()
@@ -195,11 +200,13 @@ async def test_run_t55_alerts_if_confirmation_fails():
 
 @pytest.mark.asyncio
 async def test_run_t55_alerts_if_set_order_ready_fails_all_retries():
+    redis = fakeredis.aioredis.FakeRedis()
     order_id = str(uuid.uuid4())
     owner_bot = AsyncMock()
     owner_bot.send_message = AsyncMock()
-    agent = make_agent(owner_bot=owner_bot)
+    agent = make_agent(redis=redis, owner_bot=owner_bot)
     agent._tasks[order_id] = []
+    await redis.set(f"order:buttons:pressed:{order_id}", b"auto_5min", ex=7200)
 
     mock_db = AsyncMock()
     mock_order = MagicMock()
@@ -321,7 +328,9 @@ async def test_handle_order_created_sets_deadline_and_schedules_timers():
     agent._db_factory = MagicMock(return_value=ctx)
 
     with patch.object(agent, "_schedule_timers") as mock_schedule, \
-         patch.object(agent, "_notify_all", new_callable=AsyncMock, return_value=[]):
+         patch.object(agent, "_notify_all", new_callable=AsyncMock, return_value=[]), \
+         patch("app.agents.order_agent.agent.market_api.get_order_data",
+               new_callable=AsyncMock, return_value=([], None)):
         await agent.handle_order_created("order.created", {
             "order_id": order_id,
             "market_order_id": "YM-111",
@@ -467,6 +476,8 @@ async def test_recover_timers_immediately_times_out_past_deadline():
     owner_bot.send_message = AsyncMock()
     agent = make_agent(event_bus=event_bus, owner_bot=owner_bot)
 
+    owner_bot.send_message = AsyncMock(return_value=MagicMock(message_id=99))
+
     past_deadline = datetime.now(timezone.utc) - timedelta(minutes=5)
     mock_order = MagicMock()
     mock_order.id = uuid.UUID(order_id)
@@ -507,10 +518,13 @@ async def test_recover_timers_immediately_times_out_past_deadline():
 
 
 @pytest.mark.asyncio
-async def test_recover_timers_skips_orders_without_deadline():
-    agent = make_agent()
+async def test_recover_timers_republishes_order_created_for_missing_deadline():
+    event_bus = AsyncMock()
+    agent = make_agent(event_bus=event_bus)
 
     mock_order = MagicMock()
+    mock_order.id = uuid.uuid4()
+    mock_order.market_order_id = "YM-NO-DL"
     mock_order.timer_deadline = None
     mock_order.status = "waiting"
 
@@ -527,6 +541,9 @@ async def test_recover_timers_skips_orders_without_deadline():
         await agent.recover_timers()
 
     mock_schedule.assert_not_called()
+    event_bus.publish.assert_awaited_once()
+    assert event_bus.publish.call_args[0][0] == "order.created"
+    assert event_bus.publish.call_args[0][1]["market_order_id"] == "YM-NO-DL"
 
 
 # ── Task 8: handle_button_callback ───────────────────────────────────────────

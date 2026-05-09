@@ -306,7 +306,7 @@ class OrderAgent:
             await db.commit()
 
         _MSK = timezone(timedelta(hours=3))
-        deadline_str = deadline.astimezone(_MSK).strftime("%-d.%m.%Y · %H:%M")
+        deadline_str = deadline.astimezone(_MSK).strftime("%d.%m.%Y · %H:%M").lstrip("0")
         if isinstance(items_lines, tuple):
             name_lines, sku_lines, total = items_lines
             total_str = f"{total:,.0f}".replace(",", " ")
@@ -326,7 +326,14 @@ class OrderAgent:
         if items:
             try:
                 async with self._db_factory() as db:
-                    await stock_ops.save_order_items(db, order_uuid, items)
+                    unknown_skus = await stock_ops.save_order_items(db, order_uuid, items)
+                if unknown_skus:
+                    await self._alert(
+                        f"⚠️ Заказ #{market_order_id}: SKU не найдены в системе — "
+                        f"склад не будет посчитан!\n"
+                        + "\n".join(unknown_skus)
+                        + "\nДобавьте товары в Grist и выполните /sync."
+                    )
                 async with self._db_factory() as db:
                     await stock_ops.reserve_materials(db, order_uuid, items)
                 await self._update_storefront()
@@ -468,9 +475,19 @@ class OrderAgent:
             orders = list(result.scalars().all())
 
         for order in orders:
-            if order.timer_deadline is None:
-                continue
             order_id = str(order.id)
+            if order.timer_deadline is None:
+                # Agent crashed before handle_order_created set timer_deadline.
+                # Re-publish so the handler runs again on this startup.
+                logger.warning(
+                    "Order %s (market=%s) has no timer_deadline — re-publishing order.created",
+                    order_id, order.market_order_id,
+                )
+                await self._event_bus.publish("order.created", {
+                    "order_id": order_id,
+                    "market_order_id": order.market_order_id,
+                })
+                continue
             if order.timer_deadline <= now:
                 async with self._db_factory() as db:
                     result = await db.execute(select(Order).where(Order.id == order.id))

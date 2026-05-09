@@ -15,14 +15,17 @@ from app.models.stock_movements import StockMovement
 
 async def save_order_items(
     db: AsyncSession, order_id: uuid.UUID, items: list[dict]
-) -> None:
-    """Persist order items from Market API response. items: [{sku, count, price}]"""
+) -> list[str]:
+    """Persist order items from Market API response. items: [{sku, count, price}]
+    Returns list of SKUs not found in market_products."""
+    unknown: list[str] = []
     for item in items:
         result = await db.execute(
             select(MarketProduct).where(MarketProduct.market_sku == item["sku"])
         )
         product = result.scalar_one_or_none()
         if product is None:
+            unknown.append(item["sku"])
             continue
         db.add(OrderItem(
             order_id=order_id,
@@ -31,6 +34,7 @@ async def save_order_items(
             unit_price=Decimal(str(item.get("price", 0))),
         ))
     await db.commit()
+    return unknown
 
 
 async def reserve_materials(

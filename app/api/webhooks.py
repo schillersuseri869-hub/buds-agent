@@ -84,6 +84,13 @@ async def market_webhook(request: Request, db: AsyncSession = Depends(get_db)):
             await db.rollback()
             result = await db.execute(select(Order).where(Order.market_order_id == market_order_id))
             order = result.scalar_one()
+            # Re-publish if timer_deadline not yet set: prior webhook may have committed
+            # the order but crashed before publishing to the event bus.
+            if bus is not None and order.timer_deadline is None:
+                await bus.publish("order.created", {
+                    "order_id": str(order.id),
+                    "market_order_id": market_order_id,
+                })
             return {"name": "BUDS", "time": datetime.now(timezone.utc).isoformat(), "version": "1.0"}
 
         if bus is not None:

@@ -30,7 +30,7 @@ async def test_set_order_ready_sends_put_with_correct_body():
     mock.put.assert_awaited_once()
     url, = mock.put.call_args[0]
     assert "/campaigns/148807227/orders/YM-123/status" in url
-    assert mock.put.call_args[1]["json"] == {"order": {"status": "READY_TO_SHIP"}}
+    assert mock.put.call_args[1]["json"] == {"order": {"status": "PROCESSING", "substatus": "READY_TO_SHIP"}}
 
 
 @pytest.mark.asyncio
